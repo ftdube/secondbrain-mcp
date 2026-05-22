@@ -3,15 +3,15 @@ name: CI / CD
 on:
   push:
     branches: [main]
-    paths:
-      - server.py
-      - requirements.txt
-      - Dockerfile
+    paths-ignore:
+      - "**.md"
+      - "vault-sample/**"
+      - "LICENSE"
   pull_request:
-    paths:
-      - server.py
-      - requirements.txt
-      - Dockerfile
+    paths-ignore:
+      - "**.md"
+      - "vault-sample/**"
+      - "LICENSE"
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/secondbrain-mcp

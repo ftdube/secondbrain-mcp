@@ -87,12 +87,15 @@ def build_index(vault_path: Path, db_path: Path) -> int:
 
 mcp = FastMCP("SecondBrain")
 
-SEARCH_COUNTER = Counter("mcp_searches_total", "Total search tool calls")
+OVERVIEW_COUNTER = Counter("mcp_overviews_total", "Total get_overview tool calls")
+SEARCH_COUNTER   = Counter("mcp_searches_total",  "Total search tool calls")
+READ_COUNTER     = Counter("mcp_reads_total",      "Total read_note tool calls")
 
 
 @mcp.tool()
 def get_overview() -> str:
     """Return context.md and _map.md to orient Claude at session start."""
+    OVERVIEW_COUNTER.inc()
     parts = []
     for name in ("context.md", "_map.md"):
         p = VAULT_PATH / name
@@ -143,6 +146,7 @@ def search(query: str) -> str:
 @mcp.tool()
 def read_note(path: str) -> str:
     """Read a full vault note by relative path (e.g. 'Homelab/Ocean/Summary.md')."""
+    READ_COUNTER.inc()
     p = (VAULT_PATH / path).resolve()
     if not p.is_relative_to(VAULT_PATH.resolve()):
         return f"Access denied: {path}"

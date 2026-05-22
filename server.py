@@ -161,10 +161,13 @@ def _get_jwks() -> PyJWKClient:
 
 
 # Paths that do not require a Bearer token.
+# AUTH_PUBLIC_EXTRA: optional comma-separated list of additional public paths.
+_extra = os.environ.get("AUTH_PUBLIC_EXTRA", "")
 AUTH_PUBLIC = frozenset({
     "/health",
     "/reindex",
     "/.well-known/oauth-protected-resource",
+    *(_extra.split(",") if _extra else []),
 })
 
 

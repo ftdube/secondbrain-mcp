@@ -10,7 +10,7 @@ Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid s
 - **3 tools only** — do not add tools without deliberate design decision; each tool costs ~250 tokens per session
 - **FTS5-only in Phase 1a** — no embeddings, no sqlite-vec, no ONNX imports
 - **`readOnlyRootFilesystem: true`** in K8s — server.py must not write outside `DB_PATH` and `/tmp`
-- **AUTH_PUBLIC paths** (`/health`, `/reindex`, `/.well-known/oauth-protected-resource`) skip JWT validation — do not move these behind auth
+- **AUTH_PUBLIC paths** (`/health`, `/reindex`, `/.well-known/oauth-protected-resource`) always skip JWT validation — do not remove these; extras are added via `AUTH_PUBLIC_EXTRA` env var
 
 ## Non-obvious
 - `mcp.http_app()` is the fastmcp 2.x method for the ASGI app. If missing in the installed version, try `mcp.streamable_http_app()` then `mcp.sse_app()` — the method name varies across minor versions
@@ -28,5 +28,5 @@ MCP_CLIENT_ID=mcp-secondbrain \
 MCP_BASE_URL=http://localhost:8000 \
 python server.py
 ```
-To skip auth locally, temporarily add `/mcp` (or the MCP transport path) to `AUTH_PUBLIC`.
+To skip auth locally, set `AUTH_PUBLIC_EXTRA=/mcp` (or whatever the MCP transport path is).
 

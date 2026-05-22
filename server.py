@@ -180,7 +180,10 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             return JSONResponse(
                 {"error": "unauthorized"},
                 status_code=401,
-                headers={"WWW-Authenticate": f'Bearer realm="{MCP_BASE_URL}"'},
+                headers={"WWW-Authenticate": (
+                    f'Bearer realm="{MCP_BASE_URL}",'
+                    f' resource_metadata="{MCP_BASE_URL}/.well-known/oauth-protected-resource"'
+                )},
             )
         token = auth.removeprefix("Bearer ")
         try:

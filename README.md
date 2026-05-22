@@ -56,6 +56,7 @@ VAULT_PATH=/path/to/vault docker compose up
 | `MCP_CLIENT_ID` | yes | OAuth client ID registered in Dex |
 | `MCP_BASE_URL` | yes | Public base URL of this server (for OAuth resource metadata) |
 | `DB_PATH` | no | SQLite database path (default: `/data/index.db`) |
+| `AUTH_PUBLIC_EXTRA` | no | Comma-separated paths to add to the public (no-auth) list |
 
 ## Endpoints
 

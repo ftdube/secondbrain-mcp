@@ -1,0 +1,19 @@
+services:
+  mcp:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      VAULT_PATH: /vault
+      DB_PATH: /data/index.db
+      # For local dev, point DEX_ISSUER at a local Dex instance or set to a
+      # dummy value and comment out BearerAuthMiddleware in server.py temporarily.
+      DEX_ISSUER: http://dex:5556
+      MCP_CLIENT_ID: mcp-secondbrain
+      MCP_BASE_URL: http://localhost:8000
+    volumes:
+      - ${VAULT_PATH:-./vault-sample}:/vault:ro
+      - mcp-data:/data
+
+volumes:
+  mcp-data:

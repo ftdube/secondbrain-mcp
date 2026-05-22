@@ -28,6 +28,11 @@ jobs:
       - run: pip install ruff --quiet
       - run: ruff check server.py
 
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
@@ -37,7 +42,7 @@ jobs:
           severity: CRITICAL,HIGH
 
   build:
-    needs: lint
+    needs: [lint, scan]
     runs-on: ubuntu-latest
     permissions:
       contents: read

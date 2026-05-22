@@ -24,10 +24,11 @@ import httpx
 import uvicorn
 from fastmcp import FastMCP
 from jwt import PyJWKClient, decode as jwt_decode, PyJWTError
+from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, Response
 from starlette.routing import Mount, Route
 
 log = logging.getLogger(__name__)
@@ -86,6 +87,8 @@ def build_index(vault_path: Path, db_path: Path) -> int:
 
 mcp = FastMCP("SecondBrain")
 
+SEARCH_COUNTER = Counter("mcp_searches_total", "Total search tool calls")
+
 
 @mcp.tool()
 def get_overview() -> str:
@@ -101,6 +104,7 @@ def get_overview() -> str:
 @mcp.tool()
 def search(query: str) -> str:
     """Search the vault. Returns up to 5 excerpts (path, heading, 200-char snippet)."""
+    SEARCH_COUNTER.inc()
     conn = sqlite3.connect(DB_PATH)
     try:
         rows = conn.execute(
@@ -165,6 +169,7 @@ def _get_jwks() -> PyJWKClient:
 _extra = os.environ.get("AUTH_PUBLIC_EXTRA", "")
 AUTH_PUBLIC = frozenset({
     "/health",
+    "/metrics",
     "/reindex",
     "/.well-known/oauth-protected-resource",
     *(_extra.split(",") if _extra else []),
@@ -229,6 +234,10 @@ async def _lifespan(_: Starlette) -> AsyncIterator[None]:
     yield
 
 
+async def _metrics(_: Request) -> Response:
+    return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
 async def _health(_: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
@@ -255,6 +264,7 @@ app = Starlette(
     lifespan=_lifespan,
     routes=[
         Route("/health",                                _health),
+        Route("/metrics",                               _metrics),
         Route("/reindex",                               _reindex,        methods=["POST"]),
         Route("/.well-known/oauth-protected-resource",  _oauth_metadata),
         Mount("/",                                      mcp_asgi),

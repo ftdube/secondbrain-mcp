@@ -20,7 +20,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncIterator
 
-import httpx
 import uvicorn
 from fastmcp import FastMCP
 from jwt import PyJWKClient, decode as jwt_decode, PyJWTError
@@ -36,6 +35,7 @@ log = logging.getLogger(__name__)
 VAULT_PATH    = Path(os.environ["VAULT_PATH"])
 DB_PATH       = Path(os.environ.get("DB_PATH", "/data/index.db"))
 DEX_ISSUER    = os.environ["DEX_ISSUER"]
+DEX_JWKS_URI  = os.environ.get("DEX_JWKS_URI", f"{DEX_ISSUER}/keys")
 MCP_CLIENT_ID = os.environ["MCP_CLIENT_ID"]
 MCP_BASE_URL  = os.environ["MCP_BASE_URL"]
 
@@ -161,10 +161,7 @@ _jwks_client: PyJWKClient | None = None
 def _get_jwks() -> PyJWKClient:
     global _jwks_client
     if _jwks_client is None:
-        cfg = httpx.get(
-            f"{DEX_ISSUER}/.well-known/openid-configuration", timeout=10
-        ).json()
-        _jwks_client = PyJWKClient(cfg["jwks_uri"], cache_keys=True)
+        _jwks_client = PyJWKClient(DEX_JWKS_URI, cache_keys=True)
     return _jwks_client
 
 

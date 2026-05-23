@@ -94,9 +94,10 @@ OVERVIEW_COUNTER = Counter("mcp_overviews_total", "Total get_overview tool calls
 SEARCH_COUNTER   = Counter("mcp_searches_total",  "Total search tool calls")
 READ_COUNTER     = Counter("mcp_reads_total",      "Total read_note tool calls")
 
-OVERVIEW_CHARS = Counter("mcp_overview_chars_total", "Characters returned by get_overview")
-SEARCH_CHARS   = Counter("mcp_search_chars_total",   "Characters returned by search")
-READ_CHARS     = Counter("mcp_read_chars_total",      "Characters returned by read_note")
+OVERVIEW_CHARS  = Counter("mcp_overview_chars_total",  "Characters returned by get_overview")
+SEARCH_CHARS    = Counter("mcp_search_chars_total",    "Characters returned by search")
+READ_CHARS      = Counter("mcp_read_chars_total",       "Characters returned by read_note")
+SEARCH_MISSES   = Counter("mcp_search_misses_total",   "Search queries that returned no results")
 
 
 @mcp.tool()
@@ -149,6 +150,7 @@ def search(query: str) -> str:
     finally:
         conn.close()
     if not rows:
+        SEARCH_MISSES.inc()
         return "No results."
     result = "\n\n".join(f"**{r[0]}** — {r[1]}\n{r[2]}" for r in rows)
     SEARCH_CHARS.inc(len(result))

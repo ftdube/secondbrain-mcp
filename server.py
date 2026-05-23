@@ -203,7 +203,8 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
                 audience=MCP_CLIENT_ID,
                 issuer=DEX_ISSUER,
             )
-        except PyJWTError:
+        except PyJWTError as e:
+            log.warning("JWT validation failed: %s", e)
             return JSONResponse({"error": "invalid token"}, status_code=401)
         return await call_next(request)
 

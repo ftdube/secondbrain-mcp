@@ -64,8 +64,40 @@ VAULT_PATH=/path/to/vault docker compose up
 |---|---|---|
 | `/` | Bearer JWT | MCP endpoint (streamable HTTP) |
 | `/health` | none | Health check — `{"status": "ok"}` |
+| `/metrics` | none | Prometheus metrics |
 | `/reindex` | none | POST — rebuild FTS5 index from vault |
 | `/.well-known/oauth-protected-resource` | none | OAuth 2.1 resource metadata |
+
+## Monitoring
+
+The `/metrics` endpoint exposes Prometheus counters. Point a Prometheus scrape job at it, then build Grafana panels from these metrics:
+
+| Metric | Description |
+|---|---|
+| `mcp_overviews_total` | `get_overview` calls |
+| `mcp_searches_total` | `search` calls |
+| `mcp_reads_total` | `read_note` calls |
+| `mcp_search_misses_total` | `search` calls that returned no results |
+| `mcp_overview_chars_total` | Characters returned by `get_overview` |
+| `mcp_search_chars_total` | Characters returned by `search` |
+| `mcp_read_chars_total` | Characters returned by `read_note` |
+
+**Useful PromQL**
+
+Call volume:
+```promql
+rate(mcp_searches_total[5m])
+```
+
+Approximate tokens returned per tool (chars ÷ 4):
+```promql
+rate(mcp_search_chars_total[5m]) / 4
+```
+
+Search miss rate (useful for deciding when to upgrade to hybrid search):
+```promql
+rate(mcp_search_misses_total[1h]) / rate(mcp_searches_total[1h])
+```
 
 ## Deployment
 

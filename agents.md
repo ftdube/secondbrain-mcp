@@ -19,6 +19,9 @@ Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid s
 - The vault watcher polls every 30s; git-sync runs every 5m — changes appear within 30s of a sync, no exechook needed
 - `PyJWKClient(cache_keys=True)` caches Dex's signing keys in memory — a Dex key rotation requires a pod restart to pick up new keys
 - FTS5 query errors are caught and retried as a quoted phrase — this is intentional, not a bug
+- Cloudflare blocks in-cluster requests to the public Dex URL — OIDC discovery is skipped entirely; `DEX_JWKS_URI` points directly to the in-cluster JWKS endpoint (e.g. `http://dex.dex.svc.cluster.local:5556/keys`)
+- `WWW-Authenticate` must include `resource_metadata="<MCP_BASE_URL>/.well-known/oauth-protected-resource"` — without it Claude.ai cannot discover the OAuth endpoint from a 401 and will not initiate the PKCE flow
+- git-sync maintains a `vault/` symlink inside the mounted volume — all vault access must traverse `VAULT_PATH/vault` (with fallback to `VAULT_PATH` for local dev), otherwise `.worktrees/<sha>/` paths get indexed alongside the canonical paths
 
 ## Local dev
 ```bash

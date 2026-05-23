@@ -232,7 +232,7 @@ async def _vault_watcher() -> None:
 
 @asynccontextmanager
 async def _lifespan(app: Starlette) -> AsyncIterator[None]:
-    async with mcp_asgi.router.lifespan_context(app):
+    async with mcp_asgi.lifespan(app):
         if VAULT_PATH.exists():
             build_index(VAULT_PATH, DB_PATH)
         else:

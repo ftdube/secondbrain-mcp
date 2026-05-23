@@ -186,6 +186,7 @@ class BearerAuthMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
         auth = request.headers.get("Authorization", "")
         if not auth.startswith("Bearer "):
+            log.warning("No Bearer token for %s (Authorization: %r)", request.url.path, auth[:30] if auth else None)
             return JSONResponse(
                 {"error": "unauthorized"},
                 status_code=401,

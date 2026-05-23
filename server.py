@@ -94,6 +94,10 @@ OVERVIEW_COUNTER = Counter("mcp_overviews_total", "Total get_overview tool calls
 SEARCH_COUNTER   = Counter("mcp_searches_total",  "Total search tool calls")
 READ_COUNTER     = Counter("mcp_reads_total",      "Total read_note tool calls")
 
+OVERVIEW_CHARS = Counter("mcp_overview_chars_total", "Characters returned by get_overview")
+SEARCH_CHARS   = Counter("mcp_search_chars_total",   "Characters returned by search")
+READ_CHARS     = Counter("mcp_read_chars_total",      "Characters returned by read_note")
+
 
 @mcp.tool()
 def get_overview() -> str:
@@ -105,7 +109,9 @@ def get_overview() -> str:
         p = effective / name
         if p.exists():
             parts.append(f"## {name}\n\n{p.read_text()}")
-    return "\n\n---\n\n".join(parts) or "Vault unavailable."
+    result = "\n\n---\n\n".join(parts) or "Vault unavailable."
+    OVERVIEW_CHARS.inc(len(result))
+    return result
 
 
 @mcp.tool()
@@ -144,7 +150,9 @@ def search(query: str) -> str:
         conn.close()
     if not rows:
         return "No results."
-    return "\n\n".join(f"**{r[0]}** — {r[1]}\n{r[2]}" for r in rows)
+    result = "\n\n".join(f"**{r[0]}** — {r[1]}\n{r[2]}" for r in rows)
+    SEARCH_CHARS.inc(len(result))
+    return result
 
 
 @mcp.tool()
@@ -155,7 +163,9 @@ def read_note(path: str) -> str:
     p = (effective / path).resolve()
     if not p.is_relative_to(effective.resolve()):
         return f"Access denied: {path}"
-    return p.read_text() if p.exists() else f"Not found: {path}"
+    result = p.read_text() if p.exists() else f"Not found: {path}"
+    READ_CHARS.inc(len(result))
+    return result
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────

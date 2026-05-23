@@ -231,13 +231,14 @@ async def _vault_watcher() -> None:
 # ── HTTP app ──────────────────────────────────────────────────────────────────
 
 @asynccontextmanager
-async def _lifespan(_: Starlette) -> AsyncIterator[None]:
-    if VAULT_PATH.exists():
-        build_index(VAULT_PATH, DB_PATH)
-    else:
-        log.warning("vault not mounted at startup; index empty until first sync")
-    asyncio.create_task(_vault_watcher())
-    yield
+async def _lifespan(app: Starlette) -> AsyncIterator[None]:
+    async with mcp_asgi.router.lifespan_context(app):
+        if VAULT_PATH.exists():
+            build_index(VAULT_PATH, DB_PATH)
+        else:
+            log.warning("vault not mounted at startup; index empty until first sync")
+        asyncio.create_task(_vault_watcher())
+        yield
 
 
 async def _metrics(_: Request) -> Response:

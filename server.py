@@ -69,9 +69,12 @@ def build_index(vault_path: Path, db_path: Path) -> int:
             tokenize = 'porter unicode61'
         );
     """)
+    effective = vault_path / "vault"
+    if not effective.exists():
+        effective = vault_path
     rows: list[tuple[str, str, str]] = []
-    for md in sorted(vault_path.rglob("*.md")):
-        rel = str(md.relative_to(vault_path))
+    for md in sorted(effective.rglob("*.md")):
+        rel = str(md.relative_to(effective))
         if "Chat Archive" in rel:
             continue
         for chunk in _iter_chunks(rel, md.read_text(errors="replace")):
@@ -96,9 +99,10 @@ READ_COUNTER     = Counter("mcp_reads_total",      "Total read_note tool calls")
 def get_overview() -> str:
     """Return context.md and _map.md to orient Claude at session start."""
     OVERVIEW_COUNTER.inc()
+    effective = VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
     parts = []
     for name in ("context.md", "_map.md"):
-        p = VAULT_PATH / name
+        p = effective / name
         if p.exists():
             parts.append(f"## {name}\n\n{p.read_text()}")
     return "\n\n---\n\n".join(parts) or "Vault unavailable."
@@ -118,7 +122,7 @@ def search(query: str) -> str:
             FROM   chunks_fts
             WHERE  chunks_fts MATCH ?
             ORDER  BY rank
-            LIMIT  5
+            LIMIT  10
             """,
             (query,),
         ).fetchall()
@@ -132,7 +136,7 @@ def search(query: str) -> str:
             FROM   chunks_fts
             WHERE  chunks_fts MATCH ?
             ORDER  BY rank
-            LIMIT  5
+            LIMIT  10
             """,
             (f'"{query}"',),
         ).fetchall()
@@ -147,8 +151,9 @@ def search(query: str) -> str:
 def read_note(path: str) -> str:
     """Read a full vault note by relative path (e.g. 'Homelab/Ocean/Summary.md')."""
     READ_COUNTER.inc()
-    p = (VAULT_PATH / path).resolve()
-    if not p.is_relative_to(VAULT_PATH.resolve()):
+    effective = VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
+    p = (effective / path).resolve()
+    if not p.is_relative_to(effective.resolve()):
         return f"Access denied: {path}"
     return p.read_text() if p.exists() else f"Not found: {path}"
 
@@ -217,7 +222,7 @@ async def _vault_watcher() -> None:
         try:
             mtime = max(
                 f.stat().st_mtime
-                for f in VAULT_PATH.rglob("*.md")
+                for f in (VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH).rglob("*.md")
                 if "Chat Archive" not in str(f)
             )
             if mtime > last:

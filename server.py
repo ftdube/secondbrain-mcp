@@ -1,17 +1,20 @@
 """
 SecondBrain MCP server — Phase 1a (FTS5 keyword search).
 
-Three tools:
-  get_overview()       — context.md + _map.md (session start)
-  search(query)        — FTS5 keyword search, top 5 excerpts
-  read_note(path)      — full note by vault-relative path
+Four tools:
+  get_overview()        — context.md + _map.md (session start)
+  search(query)         — FTS5 keyword search, top 5 excerpts
+  read_note(path)       — full note by vault-relative path
+  note(title, content)  — save a draft note to the vault inbox
 
 Auth: Bearer JWT issued by Dex (OAuth 2.1 / PKCE).
 Index: SQLite FTS5 with porter stemmer, rebuilt on startup and POST /reindex.
 Vault: mounted at VAULT_PATH (populated by a git-sync sidecar).
+Inbox: notes written to OUTBOX_PATH; push-sync sidecar commits and pushes them.
 """
 
 import asyncio
+from datetime import datetime
 import logging
 import os
 import re
@@ -38,6 +41,7 @@ DEX_ISSUER    = os.environ["DEX_ISSUER"]
 DEX_JWKS_URI  = os.environ.get("DEX_JWKS_URI", f"{DEX_ISSUER}/keys")
 MCP_CLIENT_ID = os.environ["MCP_CLIENT_ID"]
 MCP_BASE_URL  = os.environ["MCP_BASE_URL"]
+OUTBOX_PATH   = Path(os.environ.get("OUTBOX_PATH", "/outbox"))
 
 
 # ── Indexer ───────────────────────────────────────────────────────────────────
@@ -98,6 +102,7 @@ OVERVIEW_CHARS  = Counter("mcp_overview_chars_total",  "Characters returned by g
 SEARCH_CHARS    = Counter("mcp_search_chars_total",    "Characters returned by search")
 READ_CHARS      = Counter("mcp_read_chars_total",       "Characters returned by read_note")
 SEARCH_MISSES   = Counter("mcp_search_misses_total",   "Search queries that returned no results")
+NOTE_COUNTER    = Counter("mcp_notes_total",            "Total note tool calls")
 
 
 @mcp.tool()
@@ -168,6 +173,26 @@ def read_note(path: str) -> str:
     result = p.read_text() if p.exists() else f"Not found: {path}"
     READ_CHARS.inc(len(result))
     return result
+
+
+def _note_filename(title: str) -> str:
+    safe = re.sub(r"[^\w\s-]", "", title).strip()
+    safe = re.sub(r"\s+", "-", safe)
+    return (safe[:80] or "untitled") + ".md"
+
+
+@mcp.tool()
+def note(title: str, content: str) -> str:
+    """Save a note to the vault inbox for later review. Claude drafts the content; you review and file it in Obsidian at your leisure."""
+    NOTE_COUNTER.inc()
+    OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
+    filename = _note_filename(title)
+    dest = OUTBOX_PATH / filename
+    if dest.exists():
+        filename = f"{filename[:-3]}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+        dest = OUTBOX_PATH / filename
+    dest.write_text(f"# {title}\n\n{content}\n")
+    return f"Saved to inbox: {filename}"
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────

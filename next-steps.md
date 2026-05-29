@@ -20,7 +20,3 @@ Grafana PromQL: `rate(mcp_search_misses_total[7d]) / rate(mcp_searches_total[7d]
 
 Add `sqlite-vec`, ONNX `all-MiniLM-L6-v2`, RRF merge, wikilink adjacency table.
 
-## Phase 1.5 — mobile write-back
-
-Trigger: need to append to vault from Claude mobile.
-`append_context(content)` tool, read-write SSH key, git commit/push.

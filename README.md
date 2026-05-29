@@ -4,7 +4,7 @@ A self-hosted MCP server that gives the Claude mobile app (Android/iOS) access t
 
 ## Why
 
-Claude on desktop can navigate a vault via the filesystem MCP server. Mobile can't: the Claude app has no local filesystem access and the generic 11-tool filesystem server costs ~10k tokens per session. This server exposes exactly 3 tools, costs ~3k tokens per session, and runs on low-power hardware.
+Claude on desktop can navigate a vault via the filesystem MCP server. Mobile can't: the Claude app has no local filesystem access and the generic 11-tool filesystem server costs ~10k tokens per session. This server exposes exactly 4 tools, costs ~3k tokens per session, and runs on low-power hardware.
 
 ## How it works
 
@@ -16,18 +16,23 @@ Dex (OIDC authorization server) ──► IdP
   │ JWT
   ▼
 secondbrain-mcp (this server)
-  │ reads
-  ▼
-emptyDir vault ◄── git-sync sidecar ◄── vault git repo ◄── Desktop Obsidian vault
+  │ reads                  │ writes to outbox
+  ▼                        ▼
+vault volume          outbox volume
+  ▲                        │
+git-sync sidecar      push-sync sidecar
+  │                        │
+  └──────── vault git repo ┘ ◄── Desktop Obsidian vault
 ```
 
-Three tools:
+Four tools:
 
 | Tool | Returns |
 |---|---|
 | `get_overview()` | `context.md` + `_map.md` — called once per session |
 | `search(query)` | Top 5 FTS5 excerpts (path + heading + ~200 chars) |
 | `read_note(path)` | Full note by vault-relative path |
+| `note(title, content)` | Saves a draft note to `Inbox/` for later review in Obsidian |
 
 ## Running locally
 
@@ -41,10 +46,10 @@ MCP_BASE_URL=http://localhost:8000 \
 python server.py
 ```
 
-Or with Docker Compose (set `VAULT_PATH` to your vault directory):
+Or with Docker Compose for local dev (vault mounted from host, no git required):
 
 ```bash
-VAULT_PATH=/path/to/vault docker compose up
+VAULT_PATH=/path/to/vault docker compose up mcp
 ```
 
 ## Environment variables
@@ -56,6 +61,7 @@ VAULT_PATH=/path/to/vault docker compose up
 | `MCP_CLIENT_ID` | yes | OAuth client ID registered in Dex |
 | `MCP_BASE_URL` | yes | Public base URL of this server (for OAuth resource metadata) |
 | `DB_PATH` | no | SQLite database path (default: `/data/index.db`) |
+| `OUTBOX_PATH` | no | Directory where `note` writes files for push-sync (default: `/outbox`) |
 | `AUTH_PUBLIC_EXTRA` | no | Comma-separated paths to add to the public (no-auth) list |
 
 ## Endpoints
@@ -103,7 +109,17 @@ rate(mcp_search_misses_total[1h]) / rate(mcp_searches_total[1h])
 
 This server is designed to run in Kubernetes alongside Dex.
 
-The `git-sync` sidecar polls a git repo every 5 minutes and calls `POST /reindex` on each sync. The server also polls vault mtime every 30 seconds as a fallback.
+The `git-sync` sidecar polls the vault git repo every 5 minutes. The server detects changes by polling vault mtime every 30 seconds and reindexes automatically.
+
+## Sidecars
+
+**git-sync** uses the official [`registry.k8s.io/git-sync/git-sync`](https://github.com/kubernetes/git-sync) image. It clones the vault repo on startup and pulls every 5 minutes. The server detects the updated mtime and reindexes automatically.
+
+**push-sync** is a small custom sidecar (`./sidecars`) built on `alpine/git`. It watches `OUTBOX_PATH` for files written by the `note` tool, commits each to `NOTE_INBOX/` in the vault repo, and pushes. This keeps git out of the main server container.
+
+Both sidecars mount the same SSH key at `/ssh/id_ed25519` (configured via `SSH_KEY_PATH` in `.env`). See `compose.yaml` for the full configuration — it is the authoritative reference for sidecar env vars.
+
+For local dev without a git repo, run only `docker compose up mcp`.
 
 ## Auth
 

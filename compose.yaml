@@ -1,3 +1,6 @@
+x-ssh-key: &ssh-key
+  - ${SSH_KEY_PATH:-~/.ssh/id_ed25519}:/ssh/id_ed25519:ro
+
 services:
   mcp:
     build: .
@@ -6,6 +9,7 @@ services:
     environment:
       VAULT_PATH: /vault
       DB_PATH: /data/index.db
+      OUTBOX_PATH: /outbox
       # For local dev, point DEX_ISSUER at a local Dex instance or set to a
       # dummy value and comment out BearerAuthMiddleware in server.py temporarily.
       DEX_ISSUER: http://dex:5556
@@ -14,6 +18,34 @@ services:
     volumes:
       - ${VAULT_PATH:-./vault-sample}:/vault:ro
       - mcp-data:/data
+      - mcp-outbox:/outbox
+
+  git-sync:
+    image: registry.k8s.io/git-sync/git-sync:v4.4.1
+    environment:
+      GITSYNC_REPO: ${GIT_REPO_URL:-}
+      GITSYNC_ROOT: /vault
+      GITSYNC_LINK: vault
+      GITSYNC_REF: main
+      GITSYNC_PERIOD: 5m
+      GITSYNC_SSH_KEY_FILE: /ssh/id_ed25519
+      GITSYNC_SSH_KNOWN_HOSTS: "false"
+    volumes:
+      - ${VAULT_PATH:-./vault-sample}:/vault
+      - *ssh-key
+
+  push-sync:
+    build: ./sidecars
+    environment:
+      GIT_REPO_URL: ${GIT_REPO_URL:-}
+      GIT_SSH_KEY_PATH: /ssh/id_ed25519
+      OUTBOX_PATH: /outbox
+      NOTE_INBOX: Inbox
+      PUSH_SYNC_INTERVAL: "10"
+    volumes:
+      - mcp-outbox:/outbox
+      - *ssh-key
 
 volumes:
   mcp-data:
+  mcp-outbox:

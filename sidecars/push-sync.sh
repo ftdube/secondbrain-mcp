@@ -6,8 +6,12 @@ INBOX="${NOTE_INBOX:-Inbox}"
 INTERVAL="${PUSH_SYNC_INTERVAL:-10}"
 CLONE_DIR=/tmp/vault-repo
 
+export HOME=/tmp
+
 if [ -n "${GIT_SSH_KEY_PATH:-}" ]; then
-  export GIT_SSH_COMMAND="ssh -i $GIT_SSH_KEY_PATH -o StrictHostKeyChecking=no -o BatchMode=yes"
+  cp "$GIT_SSH_KEY_PATH" /tmp/push_sync_id
+  chmod 400 /tmp/push_sync_id
+  export GIT_SSH_COMMAND="ssh -i /tmp/push_sync_id -o StrictHostKeyChecking=no -o BatchMode=yes"
 fi
 
 git clone --depth=1 "$GIT_REPO_URL" "$CLONE_DIR"

@@ -14,7 +14,14 @@ if [ -n "${GIT_SSH_KEY_PATH:-}" ]; then
   export GIT_SSH_COMMAND="ssh -i /tmp/push_sync_id -o StrictHostKeyChecking=no -o BatchMode=yes"
 fi
 
-git clone --depth=1 "$GIT_REPO_URL" "$CLONE_DIR"
+if [ -d "$CLONE_DIR/.git" ]; then
+  git -C "$CLONE_DIR" remote set-url origin "$GIT_REPO_URL"
+  git -C "$CLONE_DIR" fetch --all
+  git -C "$CLONE_DIR" reset --hard origin/main
+else
+  rm -rf "$CLONE_DIR"
+  git clone --depth=1 "$GIT_REPO_URL" "$CLONE_DIR"
+fi
 git -C "$CLONE_DIR" config user.email "push-sync@localhost"
 git -C "$CLONE_DIR" config user.name "MCP Push Sync"
 

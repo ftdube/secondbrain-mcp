@@ -11,13 +11,13 @@ export HOME=/tmp
 if [ -n "${GIT_SSH_KEY_PATH:-}" ]; then
   cp "$GIT_SSH_KEY_PATH" /tmp/push_sync_id
   chmod 400 /tmp/push_sync_id
-  export GIT_SSH_COMMAND="ssh -i /tmp/push_sync_id -o StrictHostKeyChecking=no -o BatchMode=yes"
+  export GIT_SSH_COMMAND="ssh -i /tmp/push_sync_id -o StrictHostKeyChecking=no -o BatchMode=yes -o UserKnownHostsFile=/dev/null"
 fi
 
 if [ -d "$CLONE_DIR/.git" ]; then
   git -C "$CLONE_DIR" remote set-url origin "$GIT_REPO_URL"
-  git -C "$CLONE_DIR" fetch --all
-  git -C "$CLONE_DIR" reset --hard origin/main
+  git -C "$CLONE_DIR" fetch --depth=1 origin main
+  git -C "$CLONE_DIR" reset --hard FETCH_HEAD
 else
   rm -rf "$CLONE_DIR"
   git clone --depth=1 "$GIT_REPO_URL" "$CLONE_DIR"

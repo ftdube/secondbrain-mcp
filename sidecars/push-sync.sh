@@ -35,7 +35,7 @@ while true; do
     cp "$f" "$CLONE_DIR/$INBOX/$filename"
     git -C "$CLONE_DIR" add "$INBOX/$filename"
     git -C "$CLONE_DIR" commit -m "inbox: ${filename%.md}"
-    git -C "$CLONE_DIR" push
+    git -C "$CLONE_DIR" push origin "$BRANCH"
     rm "$f"
     echo "pushed $INBOX/$filename"
   done

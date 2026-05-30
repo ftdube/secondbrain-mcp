@@ -20,3 +20,8 @@ Grafana PromQL: `rate(mcp_search_misses_total[7d]) / rate(mcp_searches_total[7d]
 
 Add `sqlite-vec`, ONNX `all-MiniLM-L6-v2`, RRF merge, wikilink adjacency table.
 
+## Housekeeping — extract push-sync to its own repo
+
+Trigger: CI publishing two unrelated images from one repo is messy.
+Move `sidecars/` to a standalone `push-sync` repo with its own CI. Reference it from here as an external dependency in the README and compose.yaml.
+

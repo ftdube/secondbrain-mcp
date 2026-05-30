@@ -117,7 +117,7 @@ The `git-sync` sidecar polls the vault git repo every 5 minutes. The server dete
 
 **push-sync** is a small custom sidecar (`./sidecars`) built on `alpine/git`. It watches `OUTBOX_PATH` for files written by the `note` tool, commits each to `NOTE_INBOX/` in the vault repo, and pushes. This keeps git out of the main server container.
 
-Both sidecars mount the same SSH key at `/ssh/id_ed25519` (configured via `SSH_KEY_PATH` in `.env`). See `compose.yaml` for the full configuration — it is the authoritative reference for sidecar env vars.
+Both sidecars share `GIT_REPO_URL`, `GIT_BRANCH` (default: `main`), and the SSH key at `/ssh/id_ed25519` (configured via `SSH_KEY_PATH` in `.env`). See `compose.yaml` for the full configuration — it is the authoritative reference for sidecar env vars.
 
 For local dev without a git repo, run only `docker compose up mcp`.
 

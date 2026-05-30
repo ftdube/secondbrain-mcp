@@ -26,7 +26,7 @@ services:
       GITSYNC_REPO: ${GIT_REPO_URL:-}
       GITSYNC_ROOT: /vault
       GITSYNC_LINK: vault
-      GITSYNC_REF: main
+      GITSYNC_REF: ${GIT_BRANCH:-main}
       GITSYNC_PERIOD: 5m
       GITSYNC_SSH_KEY_FILE: /ssh/id_ed25519
       GITSYNC_SSH_KNOWN_HOSTS: "false"
@@ -38,6 +38,7 @@ services:
     build: ./sidecars
     environment:
       GIT_REPO_URL: ${GIT_REPO_URL:-}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
       GIT_SSH_KEY_PATH: /ssh/id_ed25519
       OUTBOX_PATH: /outbox
       NOTE_INBOX: Inbox

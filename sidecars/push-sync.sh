@@ -4,6 +4,7 @@ set -eu
 OUTBOX="${OUTBOX_PATH:-/outbox}"
 INBOX="${NOTE_INBOX:-Inbox}"
 INTERVAL="${PUSH_SYNC_INTERVAL:-10}"
+BRANCH="${GIT_BRANCH:-main}"
 CLONE_DIR=/tmp/vault-repo
 
 export HOME=/tmp
@@ -16,11 +17,11 @@ fi
 
 if [ -d "$CLONE_DIR/.git" ]; then
   git -C "$CLONE_DIR" remote set-url origin "$GIT_REPO_URL"
-  git -C "$CLONE_DIR" fetch --depth=1 origin main
+  git -C "$CLONE_DIR" fetch --depth=1 origin "$BRANCH"
   git -C "$CLONE_DIR" reset --hard FETCH_HEAD
 else
   rm -rf "$CLONE_DIR"
-  git clone --depth=1 "$GIT_REPO_URL" "$CLONE_DIR"
+  git clone --depth=1 -b "$BRANCH" "$GIT_REPO_URL" "$CLONE_DIR"
 fi
 git -C "$CLONE_DIR" config user.email "push-sync@localhost"
 git -C "$CLONE_DIR" config user.name "MCP Push Sync"
@@ -29,7 +30,7 @@ while true; do
   for f in "$OUTBOX"/*.md; do
     [ -f "$f" ] || continue
     filename=$(basename "$f")
-    git -C "$CLONE_DIR" pull --rebase
+    git -C "$CLONE_DIR" pull --rebase origin "$BRANCH"
     mkdir -p "$CLONE_DIR/$INBOX"
     cp "$f" "$CLONE_DIR/$INBOX/$filename"
     git -C "$CLONE_DIR" add "$INBOX/$filename"

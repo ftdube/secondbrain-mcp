@@ -24,7 +24,7 @@ Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid s
 - `WWW-Authenticate` must include `resource_metadata="<MCP_BASE_URL>/.well-known/oauth-protected-resource"` — without it Claude.ai cannot discover the OAuth endpoint from a 401 and will not initiate the PKCE flow
 - git-sync (official image) maintains a `vault/` symlink inside the mounted volume pointing to a `.git-sync/<sha>/` worktree — server.py reads from `VAULT_PATH/vault` with fallback to `VAULT_PATH` for local dev; never index via the raw mount root or `.git-sync/` paths will appear alongside canonical paths. `GITSYNC_LINK=vault` must be set or the symlink name defaults to the repo name and the path resolution breaks
 - push-sync sidecar maintains its own independent `git clone` of the vault repo — it does not share the git-sync volume; it pulls before each push to avoid conflicts
-- SSH key for push-sync must be mounted with mode `0600`; K8s Secret volumes default to `0644` which SSH rejects — set `defaultMode: 0400` on the secret volume mount
+- SSH key for push-sync: K8s Secret volumes default to `0644` (world-readable), which SSH rejects — set `defaultMode: 0400` on the secret volume mount
 
 ## Local dev
 ```bash

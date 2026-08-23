@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.0 (Draft) |
+| Document version | 1.1 (Draft) |
 | System / API version documented | 1.1.0 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
@@ -17,6 +17,7 @@
 | Version | Date | Author | Summary of changes |
 |---|---|---|---|
 | 1.0 | 2026-08-23 | Claude Code | Initial issue. Covers the Phase 1a service (`get_overview`, `search`, `read_note`, `note`) plus `propose_edit` (including F8 multi-file atomic proposals), authentication, and common cross-tool requirements. |
+| 1.1 | 2026-08-23 | Claude Code | Coverage audit: added §9.9 (Indexing & Chunking, `IDX`) to give the previously-untraced `_iter_chunks`/`build_index` behavior its own requirement IDs; reworked §16 RTM into an index pointing at inline `# BRD:` traceability comments now present in every `tests/test_*.py` test function; added OI-7..OI-10 for coverage gaps found during the audit (counters never asserted, the primary vault-symlink branch never exercised, `get_overview`'s exact heading/separator format never asserted, wholesale-reindex-clears-stale-rows never proven). No requirement's *content* changed — this revision only adds requirements and corrects traceability claims. |
 
 ### Approval
 
@@ -320,6 +321,20 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | NFR-AUTH-6 | Authentication failures SHALL be logged with enough context to debug (path, truncated Authorization-header prefix) but SHALL NOT log full tokens. | Must | Implemented |
 | NFR-AUTH-7 | **Gap:** the system implements authentication (who you are) but no per-note or per-tool authorization (what you may touch); any principal with a valid `MCP_CLIENT_ID`-audienced token has full read/propose access to the entire vault. Acceptable under the current single-user model (A5). | Should (for current scale) | Not implemented — see RISK-6 |
 
+### 9.9 Indexing & Chunking (`IDX`)
+
+Added in this revision (v1.1 of this document): `_iter_chunks` and `build_index` had dedicated test coverage from the start but no corresponding requirement IDs until this coverage audit. They underpin `search` (FR-SRCH-1, FR-SRCH-3) rather than being independently invoked by any MCP tool, so they get their own subsection instead of being folded into `SRCH`.
+
+**Functional**
+
+| ID | Requirement | Priority | Status |
+|---|---|---|---|
+| FR-IDX-1 | Each note SHALL be split into chunks at H1–H3 markdown heading boundaries (`^#{1,3} `); a chunk's heading label SHALL be the nearest preceding heading, or empty for content before the first heading. | Must | Implemented |
+| FR-IDX-2 | A chunk's body SHALL include the heading line that introduces it (the chunk starts at the heading itself, not the line after it). | Must | Implemented |
+| FR-IDX-3 | Headings of level H4 or deeper SHALL NOT be treated as chunk boundaries; they remain part of the enclosing chunk's body. | Must | Implemented |
+| FR-IDX-4 | Notes under any directory literally named `Chat Archive` SHALL be excluded from indexing (they remain readable via `read_note`/`propose_edit` — see §10). | Must | Implemented |
+| FR-IDX-5 | Re-indexing SHALL be wholesale (drop and rebuild the FTS5 table from a full vault re-scan), not incremental. | Must | Implemented — see OI-10 for a coverage gap |
+
 ## 10. Data Requirements
 
 | Data | Location | Format | Notes |
@@ -406,23 +421,20 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 
 ## 16. Requirements Traceability Matrix (RTM)
 
-Full traceability is given for `propose_edit` and the common path-safety requirement, since those carry this revision's highest risk. Simpler tools are covered by a consolidated pointer to their existing test sections.
+**As of document v1.1, the fine-grained mapping lives inline in the test files themselves**, as a `# BRD: <ID>[, <ID>...]` comment directly above every `test_*` function in `tests/test_server.py` and `tests/test_apply_proposals.py` — run `grep -n "# BRD:" tests/test_*.py` for the authoritative, line-numbered list. Duplicating that mapping into this table as well was tried in document v1.0 and rejected on the second pass: a hand-maintained copy of test-to-requirement mappings drifts from the actual test suite the moment either changes, silently. This table is instead a coverage *summary*, checked against the inline comments as of this revision.
 
-| Requirement | Verified by | File |
+| Area | IDs with automated coverage | IDs with **no** automated coverage |
 |---|---|---|
-| FR-PROP-1, FR-PROP-2 | `test_propose_edit_sequential_edits_applied_in_order`, `test_propose_edit_anchor_not_found`, `test_propose_edit_anchor_ambiguous` | `tests/test_server.py` |
-| FR-PROP-3, FR-PROP-4 | `test_propose_edit_writes_proposal`, `test_propose_edit_multi_file_writes_one_combined_patch` | `tests/test_server.py` |
-| FR-PROP-6 | `test_propose_edit_missing_note_routes_to_note_tool` | `tests/test_server.py` |
-| FR-PROP-7 | `test_propose_edit_idempotent` | `tests/test_server.py` |
-| FR-PROP-8 | `test_propose_edit_multi_file_fails_atomically_no_partial_write`, `test_propose_edit_multi_file_skips_unchanged_files` | `tests/test_server.py` |
-| FR-PROP-8, NFR-PROP-8 | `test_multi_file_patch_applies_both_files`, `test_multi_file_patch_atomic_when_one_file_drifted` | `tests/test_apply_proposals.py` |
-| NFR-PROP-3, NFR-PROP-9 | `test_check_stale_when_note_drifted`, `test_drifted_apply_never_writes_conflict_markers` | `tests/test_apply_proposals.py` |
-| FR-COM-1 (path safety) | `test_read_note_path_traversal_blocked`, `test_propose_edit_path_traversal_blocked` | `tests/test_server.py` |
-| FR-OVW-1..4 | `test_get_overview_both_files`, `test_get_overview_partial`, `test_get_overview_no_files` | `tests/test_server.py` |
-| FR-SRCH-1, FR-SRCH-4, FR-SRCH-5 | `test_search_returns_matching_note`, `test_search_no_results`, `test_search_fts_syntax_fallback` | `tests/test_server.py` |
-| FR-READ-1..3 | `test_read_note_valid`, `test_read_note_not_found`, `test_read_note_nested_path` | `tests/test_server.py` |
-| FR-NOTE-1..5 | Not covered by a dedicated automated test today | — (gap; see OI-6) |
-| FR-AUTH-1..6, NFR-AUTH-1..6 | **Not covered by any automated test today** | — (RISK-8, OI-4) |
+| `COM` | FR-COM-1, FR-COM-3 | FR-COM-2 (no test isolates "never raises, always returns str" as its own assertion — implicitly true wherever the full suite passes); FR-COM-4's primary (`VAULT_PATH/vault` exists) branch — see OI-8; NFR-COM-1, NFR-COM-2, NFR-COM-3, NFR-COM-5 (process/deployment properties, not unit-testable in isolation); NFR-COM-4 — see OI-7 |
+| `IDX` | FR-IDX-1, FR-IDX-2, FR-IDX-3, FR-IDX-4 | FR-IDX-5 — see OI-10 |
+| `OVW` | FR-OVW-1, FR-OVW-3, FR-OVW-4 | FR-OVW-2's exact heading/separator format — see OI-9; NFR-OVW-2 — see OI-7 |
+| `SRCH` | FR-SRCH-1, FR-SRCH-4, FR-SRCH-5 | FR-SRCH-2 (exact 10-row limit), FR-SRCH-3 (exact snippet shape); NFR-SRCH-2, NFR-SRCH-3 — see OI-7 |
+| `READ` | FR-READ-1, FR-READ-2, FR-READ-3 | FR-READ-4 is a documented absence, not positively tested; NFR-READ-1 — see OI-7 |
+| `NOTE` | *(none)* | FR-NOTE-1..5, NFR-NOTE-1..4 — see OI-6 |
+| `PROP` | FR-PROP-1, FR-PROP-2, FR-PROP-3, FR-PROP-4, FR-PROP-6, FR-PROP-7, FR-PROP-8, NFR-PROP-2, NFR-PROP-3, NFR-PROP-8, NFR-PROP-9 | NFR-PROP-1, NFR-PROP-4, NFR-PROP-5, NFR-PROP-6, NFR-PROP-7 (process/architecture properties, not unit-testable in isolation) |
+| `AUTH` | *(none)* | FR-AUTH-1..6, NFR-AUTH-1..7 — see OI-4, RISK-8 |
+
+RISK-5's mitigation cites `test_multi_file_patch_atomic_when_one_file_drifted` by name; that reference and the ones in `agents.md`/`next-steps.md` remain accurate as of this revision (verified while writing it, not just carried forward).
 
 ## 17. Open Issues & Recommendations
 
@@ -434,6 +446,10 @@ Full traceability is given for `propose_edit` and the common path-safety require
 | OI-4 | `BearerAuthMiddleware` / JWT validation has zero automated test coverage (RISK-8). | Add tests using a fixture-generated RSA keypair and a mocked `PyJWKClient` before relying on FR-AUTH-* as verified rather than merely implemented. |
 | OI-5 | The exact MCP transport mount path (referred to in §11.1 as `/mcp`) is not pinned by any test; it depends on the installed `fastmcp` version's `http_app()` behavior, mirroring the existing gotcha already noted in `agents.md` about the method name itself. | Add a smoke test asserting the actually-served path, or pin the `fastmcp` version. |
 | OI-6 | `note` has no dedicated automated test (unlike `propose_edit`, `read_note`, `search`, `get_overview`). | Add `test_note_*` cases mirroring the existing style in `tests/test_server.py`. |
+| OI-7 | No automated test asserts a Prometheus counter increment (NFR-COM-4 and its per-tool instances: NFR-OVW-2, NFR-SRCH-2, NFR-READ-1, NFR-NOTE-2, and the undocumented-by-NFR `mcp_propose_edits_total`). Every counter is wired in `server.py` but none is read back by a test. | Add at least one test per counter reading `Counter._value.get()` (or the equivalent public API) before/after a tool call. |
+| OI-8 | No test exercises the primary `VAULT_PATH/vault` branch (the git-sync symlink target) of the effective-vault-root resolution used by `_effective_vault`/`_resolve_in_vault` (FR-COM-4) or `build_index`'s parallel copy of the same fallback logic. Every existing test sets `VAULT_PATH` to a bare directory with no nested `vault/` subdirectory, so only the fallback branch has ever run under test. | Add one test per affected function that creates `VAULT_PATH/vault/` and confirms that path — not `VAULT_PATH` itself — is what gets read from. |
+| OI-9 | `get_overview`'s exact `## <filename>` heading and `\n\n---\n\n` separator formatting (FR-OVW-2) is not asserted by any test; `test_get_overview_both_files` only checks that both files' *content* appears somewhere in the result. | Add an exact-match or regex assertion on the heading/separator formatting, not just substring containment. |
+| OI-10 | FR-IDX-5 (wholesale, non-incremental reindex) has no test proving a *second* `build_index` call actually clears rows from a prior run; existing tests only call it once per test and assert the resulting chunk count. | Add a test that indexes vault A, then vault B, and asserts vault A's chunks are gone — not just that vault B's are present. |
 
 ## 18. Appendices
 

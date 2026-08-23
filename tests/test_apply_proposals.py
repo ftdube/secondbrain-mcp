@@ -1,4 +1,5 @@
 import contextlib
+import fcntl
 import io
 import subprocess
 import sys
@@ -201,3 +202,31 @@ def test_main_dry_run_reports_stale_without_applying(tmp_path):
     assert code == 0
     assert "STALE: note-abcd1234.patch.md" in out.getvalue()
     assert stale_patch.exists()
+
+
+# BRD: OI-3 (RISK-7 mitigation)
+def test_main_rejects_concurrent_run_without_touching_anything(tmp_path):
+    repo = _init_repo(tmp_path, "old text\n")
+    patch = _write_patch(repo, "note.md", "old text\n", "new text\n")
+
+    # Simulate another apply_proposals.py process already holding the lock.
+    lock_path = repo / ".apply_proposals.lock"
+    holder = lock_path.open("w")
+    fcntl.flock(holder, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    try:
+        argv = sys.argv
+        sys.argv = ["apply_proposals.py", "--repo", str(repo), "--apply"]
+        try:
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                code = apply_proposals.main()
+        finally:
+            sys.argv = argv
+
+        assert code == 3
+        assert "holds the lock" in err.getvalue()
+        assert patch.exists()  # never even checked, let alone applied
+        assert (repo / "note.md").read_text() == "old text\n"  # untouched
+    finally:
+        fcntl.flock(holder, fcntl.LOCK_UN)
+        holder.close()

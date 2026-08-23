@@ -1,0 +1,549 @@
+openapi: 3.1.0
+
+info:
+  title: SecondBrain MCP Server API
+  version: 1.1.0
+  summary: Self-hosted MCP server exposing a five-tool, read/search/gated-write surface over an Obsidian vault.
+  description: |
+    This document specifies two genuinely different kinds of surface exposed by the same
+    process, and treats them differently on purpose:
+
+    1. **Plain REST endpoints** — `/health`, `/metrics`, `/reindex`, and
+       `/.well-known/oauth-protected-resource` are ordinary HTTP resources with static
+       request/response shapes. They are modeled here with full OpenAPI fidelity.
+
+    2. **The MCP endpoint** (`/mcp` below) is a JSON-RPC 2.0 endpoint, per the Model
+       Context Protocol specification, multiplexing several logical operations
+       (`initialize`, `tools/list`, `tools/call`, notifications, ...) through one path
+       and one HTTP method, with responses optionally streamed as Server-Sent Events.
+       OpenAPI's request/response model is built around one static shape per
+       path+method, so it cannot natively express "the response schema depends on
+       `params.name` inside the request body" without an awkward, duplicative
+       discriminator setup. Rather than force that, this spec documents the envelope
+       precisely and documents each tool's argument/result shape as a **named schema
+       plus a worked example**, with the tool name selecting which one applies. The
+       named schemas are the source of truth for validation; treat the JSON-RPC
+       `method`/`params.name` fields as the (informal) discriminator.
+
+    **Is an OpenAPI spec appropriate for an MCP server at all?** Partially. It earns
+    its keep here because this server also exposes real REST endpoints alongside MCP,
+    and because documenting each tool's argument/result *shape* as reusable JSON
+    Schema is valuable independent of transport. It does not replace the MCP
+    specification itself as the authority on protocol framing (handshake, capability
+    negotiation, notifications, SSE semantics) — for that, see
+    https://modelcontextprotocol.io.
+
+    See `BRD.md` in this repository for the full functional and non-functional
+    requirements (`FR-*` / `NFR-*` IDs) that this contract implements. Requirement IDs
+    are cross-referenced throughout this document via `x-requirements`.
+  license:
+    name: MIT
+    url: https://github.com/ftdube/secondbrain-mcp/blob/main/LICENSE
+  x-versioning-policy: |
+    See BRD.md §11.3. Summary: /health, /metrics, and the well-known OAuth metadata
+    path are permanently unversioned by platform/spec convention. The MCP tool
+    surface versions additively per-tool (a breaking tool-contract change ships as a
+    new tool name, e.g. propose_edit_v2, rather than mutating the existing one). This
+    document's own `info.version` follows semver: MAJOR for a breaking tool contract
+    change or tool removal, MINOR for an additive tool or field (e.g. 1.0.0 -> 1.1.0
+    when propose_edit was added), PATCH for description-only fixes.
+
+servers:
+  - url: "{baseUrl}"
+    description: Deployment-specific base URL (set via the MCP_BASE_URL environment variable)
+    variables:
+      baseUrl:
+        default: http://localhost:8000
+  - url: http://localhost:8000
+    description: Local development (docker compose up mcp)
+
+tags:
+  - name: operations
+    description: Unauthenticated operational endpoints (health, metrics, reindex)
+  - name: oauth
+    description: OAuth 2.1 discovery metadata
+  - name: mcp
+    description: The Model Context Protocol JSON-RPC endpoint and its five tools
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      tags: [operations]
+      summary: Liveness/readiness probe
+      security: []
+      x-requirements: []
+      responses:
+        "200":
+          description: The process is up.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+              example:
+                status: ok
+
+  /metrics:
+    get:
+      operationId: getMetrics
+      tags: [operations]
+      summary: Prometheus metrics in text exposition format
+      description: |
+        Includes, among others, the per-tool counters documented in BRD.md §13:
+        mcp_overviews_total, mcp_searches_total, mcp_reads_total, mcp_notes_total,
+        mcp_propose_edits_total, mcp_search_misses_total, and the *_chars_total
+        response-size counters.
+      security: []
+      x-requirements: [NFR-COM-4]
+      responses:
+        "200":
+          description: Prometheus text exposition format (content type per the Prometheus client library's CONTENT_TYPE_LATEST).
+          content:
+            text/plain:
+              schema:
+                type: string
+              example: |
+                # HELP mcp_searches_total Total search tool calls
+                # TYPE mcp_searches_total counter
+                mcp_searches_total 42.0
+
+  /reindex:
+    post:
+      operationId: postReindex
+      tags: [operations]
+      summary: Force a synchronous FTS5 index rebuild
+      description: |
+        Intentionally unauthenticated (see BRD.md RISK-3): this endpoint is meant to
+        be reachable by in-cluster automation, not exposed directly to the internet.
+        Rebuilds the entire index from scratch (DROP + CREATE + full rescan); not
+        incremental.
+      security: []
+      x-requirements: [NFR-COM-5]
+      responses:
+        "200":
+          description: Reindex completed synchronously.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReindexResponse"
+              example:
+                status: indexed
+                chunks: 1345
+
+  /.well-known/oauth-protected-resource:
+    get:
+      operationId: getOAuthProtectedResourceMetadata
+      tags: [oauth]
+      summary: OAuth 2.0 Protected Resource Metadata (RFC 9728)
+      description: |
+        Lets an MCP client (e.g. the Claude apps) discover the authorization server
+        for this resource from a 401 response's WWW-Authenticate header alone, per
+        FR-AUTH-4 — without this document, PKCE-based clients cannot initiate the
+        OAuth flow.
+      security: []
+      x-requirements: [FR-AUTH-6]
+      responses:
+        "200":
+          description: Protected resource metadata.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OAuthProtectedResourceMetadata"
+              example:
+                resource: https://mcp.example.com
+                authorization_servers:
+                  - https://dex.example.com
+                bearer_methods_supported:
+                  - header
+
+  /mcp:
+    post:
+      operationId: mcpJsonRpcCall
+      tags: [mcp]
+      summary: MCP JSON-RPC 2.0 endpoint (streamable HTTP transport)
+      description: |
+        **Path caveat (BRD.md OI-5):** the exact mount path served by
+        `mcp.http_app()` depends on the installed `fastmcp` version and is not
+        pinned by any test in this repository today; `/mcp` is FastMCP's
+        conventional default for the streamable-HTTP transport and is documented
+        here on that basis. Verify against a running instance
+        (`curl -i $MCP_BASE_URL/mcp` after obtaining a token) before treating this
+        path as load-bearing.
+
+        Accepts JSON-RPC 2.0 requests. The primary operation of interest is
+        `tools/call`; `initialize` and `tools/list` are included for completeness.
+        A response MAY be streamed as `text/event-stream` (Server-Sent Events)
+        instead of a single `application/json` body — both are valid per the MCP
+        streamable-HTTP transport.
+      security:
+        - bearerAuth: []
+        - oauth2: [mcp]
+      x-requirements: [FR-AUTH-1, FR-AUTH-3]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/JsonRpcRequest"
+            examples:
+              toolsList:
+                summary: List available tools
+                value:
+                  jsonrpc: "2.0"
+                  id: 1
+                  method: tools/list
+              getOverview:
+                summary: "tools/call — get_overview (BRD.md §9.3)"
+                value:
+                  jsonrpc: "2.0"
+                  id: 2
+                  method: tools/call
+                  params:
+                    name: get_overview
+                    arguments: {}
+              search:
+                summary: "tools/call — search (BRD.md §9.4)"
+                value:
+                  jsonrpc: "2.0"
+                  id: 3
+                  method: tools/call
+                  params:
+                    name: search
+                    arguments:
+                      query: heat pump hysteresis
+              readNote:
+                summary: "tools/call — read_note (BRD.md §9.5)"
+                value:
+                  jsonrpc: "2.0"
+                  id: 4
+                  method: tools/call
+                  params:
+                    name: read_note
+                    arguments:
+                      path: Homelab/Ocean/Summary.md
+              note:
+                summary: "tools/call — note (BRD.md §9.6)"
+                value:
+                  jsonrpc: "2.0"
+                  id: 5
+                  method: tools/call
+                  params:
+                    name: note
+                    arguments:
+                      title: Idea for garage door automation
+                      content: Trigger via a Home Assistant contact sensor; draft only, needs review.
+              proposeEditSingleFile:
+                summary: "tools/call — propose_edit, single file (BRD.md FR-PROP-1)"
+                value:
+                  jsonrpc: "2.0"
+                  id: 6
+                  method: tools/call
+                  params:
+                    name: propose_edit
+                    arguments:
+                      edits:
+                        - path: Home/Pool/Pool.md
+                          old: "Sanitizer: Nature2 Vision"
+                          new: "Sanitizer: Nature2 Vision (verify part # before reorder)"
+                      rationale: Flag part number needs verification before next reorder.
+              proposeEditMultiFile:
+                summary: "tools/call — propose_edit, multi-file atomic (BRD.md FR-PROP-8)"
+                value:
+                  jsonrpc: "2.0"
+                  id: 7
+                  method: tools/call
+                  params:
+                    name: propose_edit
+                    arguments:
+                      edits:
+                        - path: Career/People.md
+                          old: "Selwyn — mentor, 2019-2021"
+                          new: "Selwyn — mentor, 2019-2022"
+                        - path: Career/Patterns.md
+                          old: "Mentor overlap: 2019-2021"
+                          new: "Mentor overlap: 2019-2022"
+                      rationale: Correcting mentor-overlap end year consistently across both notes in one atomic proposal.
+      responses:
+        "200":
+          description: JSON-RPC response (or an SSE stream of JSON-RPC messages; see description).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcResponse"
+              examples:
+                toolCallResult:
+                  summary: A tools/call result (raw tool return value wrapped as a text content block)
+                  value:
+                    jsonrpc: "2.0"
+                    id: 3
+                    result:
+                      content:
+                        - type: text
+                          text: "**Home/Pool/Pool.md** — Equipment\nNovaJet pump, Carvin sand filter…"
+                      isError: false
+            text/event-stream:
+              schema:
+                type: string
+                description: "A stream of `data: <JSON-RPC message>` events per the MCP streamable-HTTP transport."
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        RS256 JWT issued by the Dex OIDC provider. Validated for audience ==
+        MCP_CLIENT_ID and issuer == DEX_ISSUER (FR-AUTH-3). No other signing
+        algorithm is accepted.
+    oauth2:
+      type: oauth2
+      description: |
+        OAuth 2.1 with mandatory PKCE (NFR-AUTH-4), delegated to Dex. authorizationUrl
+        and tokenUrl below are placeholders — the real values are this deployment's
+        DEX_ISSUER plus Dex's standard `/auth` and `/token` paths, discoverable via
+        `/.well-known/oauth-protected-resource` (FR-AUTH-6).
+      flows:
+        authorizationCode:
+          authorizationUrl: https://dex.example.com/auth
+          tokenUrl: https://dex.example.com/token
+          scopes:
+            mcp: Full access to this server's MCP tool surface (this service defines no finer-grained scopes — see BRD.md NFR-AUTH-7)
+
+  responses:
+    Unauthorized:
+      description: |
+        Missing/malformed Authorization header (FR-AUTH-4) or an invalid token
+        (FR-AUTH-5). The two cases are distinguished by the response body and by
+        the presence of a WWW-Authenticate header on the former.
+      headers:
+        WWW-Authenticate:
+          description: Present when the Authorization header was missing or malformed. Absent when a token was present but failed validation.
+          schema:
+            type: string
+          example: 'Bearer realm="https://mcp.example.com", resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource"'
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+          examples:
+            missingHeader:
+              summary: No Authorization header (FR-AUTH-4)
+              value:
+                error: unauthorized
+            invalidToken:
+              summary: Present but invalid token (FR-AUTH-5)
+              value:
+                error: invalid token
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          const: ok
+
+    ReindexResponse:
+      type: object
+      required: [status, chunks]
+      properties:
+        status:
+          type: string
+          const: indexed
+        chunks:
+          type: integer
+          minimum: 0
+          description: Number of FTS5 chunks indexed (see BRD.md §10 — one row per H1–H3-delimited span).
+
+    OAuthProtectedResourceMetadata:
+      type: object
+      required: [resource, authorization_servers, bearer_methods_supported]
+      properties:
+        resource:
+          type: string
+          format: uri
+          description: This server's own base URL (MCP_BASE_URL).
+        authorization_servers:
+          type: array
+          items:
+            type: string
+            format: uri
+          description: Always exactly one entry — DEX_ISSUER — in the current implementation.
+        bearer_methods_supported:
+          type: array
+          items:
+            type: string
+            const: header
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    JsonRpcRequest:
+      type: object
+      required: [jsonrpc, method]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          description: Absent for notifications; required for requests expecting a response.
+          oneOf:
+            - type: string
+            - type: integer
+        method:
+          type: string
+          description: |
+            MCP JSON-RPC method. This spec documents `initialize`, `tools/list`, and
+            `tools/call` in detail (via the request examples); other MCP methods
+            (`ping`, `notifications/*`, `resources/*`, ...) are part of the base MCP
+            specification and are not re-documented here.
+          examples: [initialize, tools/list, tools/call]
+        params:
+          type: object
+          description: |
+            Shape depends on `method`. For `tools/call`, use
+            `#/components/schemas/McpToolCallParams` — see the request `examples`
+            on POST /mcp for one worked example per tool.
+
+    JsonRpcResponse:
+      type: object
+      required: [jsonrpc, id]
+      properties:
+        jsonrpc:
+          type: string
+          const: "2.0"
+        id:
+          oneOf:
+            - type: string
+            - type: integer
+        result:
+          $ref: "#/components/schemas/McpToolCallResult"
+        error:
+          type: object
+          description: Present instead of `result` on a JSON-RPC-level error (malformed request, unknown method, etc. — distinct from a tool returning an error string in its own text contract).
+
+    McpToolCallParams:
+      type: object
+      required: [name, arguments]
+      properties:
+        name:
+          type: string
+          enum: [get_overview, search, read_note, note, propose_edit]
+        arguments:
+          type: object
+          description: |
+            Polymorphic on `name`; see the matching schema — GetOverviewArguments,
+            SearchArguments, ReadNoteArguments, NoteArguments, or
+            ProposeEditArguments — and BRD.md §9.3–9.7 for the full requirement set
+            each one implements.
+
+    GetOverviewArguments:
+      type: object
+      additionalProperties: false
+      description: get_overview takes no arguments (BRD.md FR-OVW-1).
+
+    SearchArguments:
+      type: object
+      required: [query]
+      additionalProperties: false
+      properties:
+        query:
+          type: string
+          description: Free-text FTS5 query (BRD.md FR-SRCH-1). Porter-stemmed, unicode61-tokenized.
+          examples: [heat pump hysteresis]
+
+    ReadNoteArguments:
+      type: object
+      required: [path]
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+          description: Vault-relative path (BRD.md FR-READ-1). Resolved strictly inside the effective vault root (FR-COM-1).
+          examples: [Homelab/Ocean/Summary.md]
+
+    NoteArguments:
+      type: object
+      required: [title, content]
+      additionalProperties: false
+      properties:
+        title:
+          type: string
+          description: Used to derive the outbox filename (BRD.md FR-NOTE-2).
+        content:
+          type: string
+          description: Written verbatim beneath a level-1 heading of `title` (BRD.md FR-NOTE-1).
+
+    EditItem:
+      type: object
+      required: [path, old, new]
+      additionalProperties: false
+      properties:
+        path:
+          type: string
+          description: Vault-relative path of the note this edit applies to. Edits sharing a path apply in array order (BRD.md FR-PROP-1).
+        old:
+          type: string
+          description: Must match the note's current content exactly once at the time this edit is applied (BRD.md FR-PROP-2).
+        new:
+          type: string
+          description: Replacement text for the single match of `old`.
+
+    ProposeEditArguments:
+      type: object
+      required: [edits, rationale]
+      additionalProperties: false
+      properties:
+        edits:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/EditItem"
+          description: |
+            One or more find/replace edits, possibly spanning multiple paths.
+            Edits spanning multiple paths become one atomic proposal — applied
+            together or not at all (BRD.md FR-PROP-8, NFR-PROP-8).
+        rationale:
+          type: string
+          description: Human-readable justification, written into the proposal artifact's header (BRD.md FR-PROP-4).
+
+    McpContentBlock:
+      type: object
+      required: [type, text]
+      properties:
+        type:
+          type: string
+          const: text
+        text:
+          type: string
+          description: |
+            The tool's raw string return value. Its semantic contract (success and
+            failure message shapes) is defined per-tool in BRD.md §9.3–9.7, not by
+            this generic envelope schema.
+
+    McpToolCallResult:
+      type: object
+      required: [content]
+      properties:
+        content:
+          type: array
+          items:
+            $ref: "#/components/schemas/McpContentBlock"
+        isError:
+          type: boolean
+          description: |
+            Note this server's tools never set this — every failure mode (bad path,
+            ambiguous anchor, missing note, etc.) is communicated as a descriptive
+            *string* in a normal (isError absent/false) text content block, not as
+            a JSON-RPC or MCP-level error. See BRD.md FR-COM-2.

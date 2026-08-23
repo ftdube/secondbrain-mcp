@@ -52,13 +52,21 @@ MCP_CLIENT_ID = os.environ["MCP_CLIENT_ID"]
 MCP_BASE_URL  = os.environ["MCP_BASE_URL"]
 OUTBOX_PATH   = Path(os.environ.get("OUTBOX_PATH", "/outbox"))
 
-# FR-BLK-1: comma-separated vault-relative directory prefixes excluded from
-# indexing, read_note, and propose_edit — mirrors AUTH_PUBLIC_EXTRA's convention.
-# Empty/unset is exactly today's behavior (NFR-BLK-2).
-_blacklist_raw = os.environ.get("VAULT_BLACKLIST", "")
-VAULT_BLACKLIST: tuple[tuple[str, ...], ...] = tuple(
-    Path(p.strip()).parts for p in _blacklist_raw.split(",") if p.strip()
-)
+def _parse_blacklist(raw: str) -> tuple[tuple[str, ...], ...]:
+    """FR-BLK-1: comma-separated vault-relative directory prefixes excluded from
+    indexing, read_note, and propose_edit — mirrors AUTH_PUBLIC_EXTRA's convention.
+    Empty/unset is exactly today's behavior (NFR-BLK-2). Leading slashes are
+    stripped: entries are relative by definition, and Path("/x").parts == ("/",
+    "x") would otherwise never match a real relative path — a plausible typo
+    (e.g. "/Health/Psychology") would then silently blacklist nothing."""
+    return tuple(
+        Path(entry).parts
+        for entry in (p.strip().lstrip("/") for p in raw.split(","))
+        if entry
+    )
+
+
+VAULT_BLACKLIST: tuple[tuple[str, ...], ...] = _parse_blacklist(os.environ.get("VAULT_BLACKLIST", ""))
 
 
 def _is_blacklisted(rel_path: Path) -> bool:

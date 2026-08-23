@@ -620,6 +620,24 @@ def test_exactly_five_tools_registered():
 
 # ── vault blacklist (BLK) ─────────────────────────────────────────────────────
 
+# BRD: FR-BLK-1
+def test_parse_blacklist_strips_leading_slashes():
+    # Regression: entries are relative by definition. Path("/x").parts ==
+    # ("/", "x"), which would never match a real relative path's parts — a
+    # plausible operator typo (leading slash) would silently blacklist
+    # nothing instead of erroring or matching.
+    assert server._parse_blacklist("/Health/Psychology, Finance/ , //Career") == (
+        ("Health", "Psychology"),
+        ("Finance",),
+        ("Career",),
+    )
+
+
+# BRD: FR-BLK-1 (empty/unset — NFR-BLK-2)
+def test_parse_blacklist_empty_string_yields_empty_tuple():
+    assert server._parse_blacklist("") == ()
+
+
 # BRD: FR-BLK-4
 def test_is_blacklisted_prefix_matching(monkeypatch):
     monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
@@ -675,3 +693,14 @@ def test_build_index_excludes_blacklisted_notes(tmp_path, monkeypatch):
     n = server.build_index(vault, tmp_path / "index.db")
 
     assert n == 1  # only Public.md indexed; Chat Archive-style exclusion, additive per NFR-BLK-2
+
+
+# BRD: FR-BLK-3, FR-COM-4 (blacklist under the primary VAULT_PATH/vault branch, not just the fallback)
+def test_read_note_blacklisted_path_denied_under_nested_vault_dir(tmp_path, monkeypatch):
+    mount = tmp_path / "mount"
+    nested = mount / "vault"
+    (nested / "Health" / "Psychology").mkdir(parents=True)
+    (nested / "Health" / "Psychology" / "secret.md").write_text("private")
+    monkeypatch.setattr(server, "VAULT_PATH", mount)
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
+    assert server.read_note("Health/Psychology/secret.md") == "Access denied: Health/Psychology/secret.md"

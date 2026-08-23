@@ -305,7 +305,7 @@ def test_note_and_propose_edit_docstrings_state_mutually_exclusive_boundary():
     assert "exact" in propose_doc or "precise" in propose_doc
 
 
-# BRD: FR-NOTE-1, FR-NOTE-5, FR-COM-3
+# BRD: FR-NOTE-1, FR-NOTE-4, FR-NOTE-5, FR-COM-3
 def test_note_writes_to_outbox(tmp_path, monkeypatch):
     vault, outbox = _note_setup(tmp_path, monkeypatch)
 
@@ -342,7 +342,7 @@ def test_note_filename_truncated_to_80_chars(tmp_path, monkeypatch):
     assert files[0].stem == "a" * 80
 
 
-# BRD: FR-NOTE-3
+# BRD: FR-NOTE-3, NFR-NOTE-4
 def test_note_collision_appends_timestamp(tmp_path, monkeypatch):
     _vault, outbox = _note_setup(tmp_path, monkeypatch)
     outbox.mkdir(parents=True)
@@ -744,6 +744,19 @@ def test_propose_edit_blacklisted_path_denied(tmp_path, monkeypatch):
     )
 
     assert result == "Access denied: Health/Psychology/secret.md"
+    assert list(outbox.glob("*.patch.md")) == []
+
+
+# BRD: FR-BLK-5, FR-PROP-6, FR-PROP-9
+def test_propose_edit_blacklisted_new_path_denied(tmp_path, monkeypatch):
+    _vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
+
+    result = server.propose_edit(
+        [{"path": "Health/Psychology/new-secret.md", "new": "content"}], "r"
+    )
+
+    assert result == "Access denied: Health/Psychology/new-secret.md"
     assert list(outbox.glob("*.patch.md")) == []
 
 

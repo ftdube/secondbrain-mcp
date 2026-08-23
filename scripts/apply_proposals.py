@@ -20,6 +20,20 @@ import sys
 from pathlib import Path
 
 DIFF_BLOCK_RE = re.compile(r"```diff\n(.*?)```", re.DOTALL)
+# A "new file" hunk's base is declared directly as /dev/null in the diff itself,
+# not looked up via the index line's blob hash — so the dummy-hash trick that
+# forces `git apply --3way` to fall back to safe context matching on drifted
+# *existing* files does NOT protect a create: git can always reconstruct an
+# empty base for it and will perform a genuine 3-way merge, silently writing
+# `<<<<<<<` conflict markers into the file on disk even though `--check` (and
+# this same behavior) reports success. Verified against a scratch repo. So a
+# create-target that already exists on disk is treated as drift and rejected
+# here, before git ever sees the patch.
+NEW_FILE_RE = re.compile(r"^diff --git a/(.+?) b/\1\nnew file mode \d+\n", re.MULTILINE)
+
+
+def _drifted_new_file_targets(repo: Path, diff_text: str) -> list[str]:
+    return [rel for rel in NEW_FILE_RE.findall(diff_text) if (repo / rel).exists()]
 
 
 @contextlib.contextmanager
@@ -50,17 +64,24 @@ def extract_diff(patch_md: Path) -> str:
 
 
 def check(repo: Path, patch_md: Path) -> bool:
+    diff_text = extract_diff(patch_md)
+    if _drifted_new_file_targets(repo, diff_text):
+        return False
     proc = subprocess.run(
         ["git", "apply", "--3way", "--check"],
-        input=extract_diff(patch_md), text=True, cwd=repo, capture_output=True, check=False,
+        input=diff_text, text=True, cwd=repo, capture_output=True, check=False,
     )
     return proc.returncode == 0
 
 
 def apply_one(repo: Path, patch_md: Path) -> tuple[bool, str]:
+    diff_text = extract_diff(patch_md)
+    drifted = _drifted_new_file_targets(repo, diff_text)
+    if drifted:
+        return False, f"create-target already exists (drifted): {', '.join(drifted)}"
     proc = subprocess.run(
         ["git", "apply", "--3way"],
-        input=extract_diff(patch_md), text=True, cwd=repo, capture_output=True, check=False,
+        input=diff_text, text=True, cwd=repo, capture_output=True, check=False,
     )
     return proc.returncode == 0, proc.stderr
 

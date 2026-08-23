@@ -37,6 +37,27 @@ def _write_patch(repo: Path, rel_path: str, old: str, new: str, rationale: str =
     return patch
 
 
+def _write_create_patch(repo: Path, rel_path: str, new: str, rationale: str = "r") -> Path:
+    proposals = repo / "Proposals"
+    proposals.mkdir(exist_ok=True)
+    diff = server._make_diff(rel_path, "", new, is_new=True)
+    patch = proposals / "new-abcd1234.patch.md"
+    patch.write_text(f"# Proposed edit: {rel_path}\n\n{rationale}\n\n```diff\n{diff}```\n")
+    return patch
+
+
+def _init_empty_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "seed.md").write_text("seed\n")
+    _git(repo, "add", "seed.md")
+    _git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
 def _init_multi_repo(tmp_path: Path, a_content: str, b_content: str) -> Path:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -106,6 +127,24 @@ def test_multi_file_patch_atomic_when_one_file_drifted(tmp_path):
     assert patch.exists()
 
 
+# BRD: FR-PROP-8, FR-PROP-9
+def test_mixed_create_and_edit_patch_applies_atomically(tmp_path):
+    repo = _init_repo(tmp_path, "old text\n")
+    proposals = repo / "Proposals"
+    proposals.mkdir(exist_ok=True)
+    diff = server._make_diff("note.md", "old text\n", "new text\n") + server._make_diff(
+        "sub/new.md", "", "hello\n", is_new=True
+    )
+    patch = proposals / "mixed-abcd1234.patch.md"
+    patch.write_text(f"# Proposed edit: note.md, sub/new.md\n\nr\n\n```diff\n{diff}```\n")
+
+    assert apply_proposals.check(repo, patch) is True
+    ok, _stderr = apply_proposals.apply_one(repo, patch)
+    assert ok is True
+    assert (repo / "note.md").read_text() == "new text\n"
+    assert (repo / "sub" / "new.md").read_text() == "hello\n"
+
+
 # BRD: FR-PROP-4 (parsing counterpart of the artifact format)
 def test_extract_diff_reads_fenced_block(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
@@ -150,6 +189,61 @@ def test_drifted_apply_never_writes_conflict_markers(tmp_path):
     assert ok is False
     assert (repo / "note.md").read_text() == "something else entirely\n"
     assert "<<<<<<<" not in (repo / "note.md").read_text()
+
+
+# BRD: FR-PROP-9, NFR-PROP-3
+def test_check_clean_for_new_file_when_target_absent(tmp_path):
+    repo = _init_empty_repo(tmp_path)
+    patch = _write_create_patch(repo, "new.md", "hello\n")
+    assert apply_proposals.check(repo, patch) is True
+
+
+# BRD: FR-PROP-9, NFR-PROP-9
+def test_apply_one_creates_new_file(tmp_path):
+    repo = _init_empty_repo(tmp_path)
+    patch = _write_create_patch(repo, "sub/new.md", "hello\n")
+    ok, _stderr = apply_proposals.apply_one(repo, patch)
+    assert ok is True
+    assert (repo / "sub" / "new.md").read_text() == "hello\n"
+
+
+# BRD: FR-PROP-9, NFR-PROP-9, NFR-PROP-11
+def test_check_stale_when_create_target_already_exists(tmp_path):
+    # Regression: for a *create* diff, the base is declared directly as
+    # /dev/null in the diff text, not looked up via the index line's blob
+    # hash — so the dummy-hash trick that protects existing-file edits from
+    # a false-clean check does not apply here. Verified this bug empirically
+    # before the fix: check() reported CLEAN even though the target had been
+    # independently created with different content in the meantime.
+    repo = _init_empty_repo(tmp_path)
+    patch = _write_create_patch(repo, "new.md", "proposed content\n")
+    (repo / "new.md").write_text("independently created content\n")
+    _git(repo, "add", "new.md")
+    _git(repo, "commit", "-q", "-m", "independent create")
+    assert apply_proposals.check(repo, patch) is False
+
+
+# BRD: FR-PROP-9, NFR-PROP-9, NFR-PROP-11, NFR-PROP-2
+def test_drifted_create_apply_never_writes_conflict_markers(tmp_path):
+    # Regression: before the _drifted_new_file_targets guard, `git apply
+    # --3way` could always reconstruct an empty base for a create hunk (it's
+    # declared in the diff itself, not fetched from a blob), so it performed
+    # a genuine 3-way merge on a drifted create-target and silently wrote
+    # <<<<<<< conflict markers into the file on disk — while check() still
+    # reported CLEAN. Verified against a real git apply before this fix.
+    repo = _init_empty_repo(tmp_path)
+    patch = _write_create_patch(repo, "new.md", "proposed content\n")
+    (repo / "new.md").write_text("independently created content\n")
+    _git(repo, "add", "new.md")
+    _git(repo, "commit", "-q", "-m", "independent create")
+
+    assert apply_proposals.check(repo, patch) is False
+    ok, stderr = apply_proposals.apply_one(repo, patch)
+    assert ok is False
+    assert "drifted" in stderr
+    content = (repo / "new.md").read_text()
+    assert content == "independently created content\n"
+    assert "<<<<<<<" not in content
 
 
 # BRD: FR-PROP-5, NFR-PROP-2

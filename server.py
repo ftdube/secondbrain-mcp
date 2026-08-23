@@ -6,7 +6,7 @@ Five tools:
   search(query)                — FTS5 keyword search, top 5 excerpts
   read_note(path)               — full note by vault-relative path
   note(title, content)          — save a draft note to the vault inbox
-  propose_edit(path, edits, rationale) — draft a reviewable diff against an existing note
+  propose_edit(edits, rationale) — draft a reviewable diff against one or more existing notes, atomically
 
 Auth: Bearer JWT issued by Dex (OAuth 2.1 / PKCE).
 Index: SQLite FTS5 with porter stemmer, rebuilt on startup and POST /reindex.
@@ -237,40 +237,66 @@ def _make_diff(rel_path: str, old: str, new: str) -> str:
 
 
 @mcp.tool()
-def propose_edit(path: str, edits: list[dict[str, str]], rationale: str) -> str:
-    """Propose find/replace edits to an existing vault note as a reviewable diff. Never writes to the vault — for new notes use `note` instead."""
+def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
+    """Propose find/replace edits to one or more existing vault notes as a single reviewable diff. Each edit is {path, old, new}; edits sharing a path apply in order. Multiple paths in one call become one atomic proposal — applied all together or not at all. Never writes to the vault — for new notes use `note` instead."""
     PROPOSE_COUNTER.inc()
-    p = _resolve_in_vault(path)
-    if p is None:
-        return f"Access denied: {path}"
-    if not p.exists():
-        return f"No such note: {path}. Use the note tool to create new notes — propose_edit only edits existing ones."
+    if not edits:
+        return "No edits provided."
 
-    rel_path = p.relative_to(_effective_vault().resolve()).as_posix()
-    original = p.read_text()
-    content = original
-    for i, edit in enumerate(edits, start=1):
-        old, new = edit["old"], edit["new"]
-        count = content.count(old)
-        if count == 0:
-            return f"Edit {i} failed: anchor not found in {path}."
-        if count > 1:
-            return f"Edit {i} failed: anchor matches {count} times in {path}, must match exactly once."
-        content = content.replace(old, new, 1)
+    paths: list[str] = []
+    for edit in edits:
+        if edit["path"] not in paths:
+            paths.append(edit["path"])
 
-    if content == original:
-        return f"No changes: edits produce identical content for {path}."
+    # path -> (rel_path, original, edited content)
+    results: dict[str, tuple[str, str, str]] = {}
+    for path in paths:
+        p = _resolve_in_vault(path)
+        if p is None:
+            return f"Access denied: {path}"
+        if not p.exists():
+            return f"No such note: {path}. Use the note tool to create new notes — propose_edit only edits existing ones."
 
-    diff = _make_diff(rel_path, original, content)
-    digest = hashlib.sha256((rel_path + content).encode()).hexdigest()[:8]
-    slug = re.sub(r"[^\w-]", "-", Path(rel_path).stem)
+        rel_path = p.relative_to(_effective_vault().resolve()).as_posix()
+        content = original = p.read_text()
+        i = 0
+        for edit in edits:
+            if edit["path"] != path:
+                continue
+            i += 1
+            old, new = edit["old"], edit["new"]
+            count = content.count(old)
+            if count == 0:
+                return f"Edit {i} for {path} failed: anchor not found."
+            if count > 1:
+                return f"Edit {i} for {path} failed: anchor matches {count} times, must match exactly once."
+            content = content.replace(old, new, 1)
+        results[path] = (rel_path, original, content)
+
+    changed_paths = [path for path in paths if results[path][1] != results[path][2]]
+    if not changed_paths:
+        return "No changes: edits produce identical content for all paths."
+
+    diff_parts, digest_parts, rel_paths = [], [], []
+    for path in changed_paths:
+        rel_path, original, content = results[path]
+        diff_parts.append(_make_diff(rel_path, original, content))
+        digest_parts.append(rel_path + content)
+        rel_paths.append(rel_path)
+    diff = "".join(diff_parts)
+    digest = hashlib.sha256("".join(digest_parts).encode()).hexdigest()[:8]
+
+    slug = re.sub(r"[^\w-]", "-", Path(rel_paths[0]).stem)
+    if len(rel_paths) > 1:
+        slug += "-multi"
     filename = f"{slug}-{digest}.patch.md"
 
     OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
     dest = OUTBOX_PATH / filename
     if dest.exists():
         return f"Already proposed (unchanged): {filename}"
-    dest.write_text(f"# Proposed edit: {rel_path}\n\n{rationale}\n\n```diff\n{diff}```\n")
+    header = ", ".join(rel_paths)
+    dest.write_text(f"# Proposed edit: {header}\n\n{rationale}\n\n```diff\n{diff}```\n")
     return f"Proposed: {filename}"
 
 

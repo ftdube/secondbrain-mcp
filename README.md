@@ -33,11 +33,11 @@ Five tools:
 | `search(query)` | Top 5 FTS5 excerpts (path + heading + ~200 chars) |
 | `read_note(path)` | Full note by vault-relative path |
 | `note(title, content)` | Saves a draft note to `Inbox/` for later review in Obsidian |
-| `propose_edit(path, edits, rationale)` | Drafts a reviewable diff against an *existing* note, saved to `Proposals/` — never writes the vault directly |
+| `propose_edit(edits, rationale)` | Drafts a reviewable diff against one or more *existing* notes, saved to `Proposals/` — never writes the vault directly |
 
 ### Proposing edits to existing notes
 
-`note` only creates new Inbox seeds — editing a structured note from Claude.ai (desktop or mobile) was previously off-limits on conflict/correctness grounds. `propose_edit` closes that gap safely: it takes an ordered list of `{old, new}` find/replace pairs, applies them in-process against the vault mirror (each anchor must match exactly once), and writes a git-format diff as a `Proposals/*.patch.md` artifact — never mutating the vault or invoking git itself.
+`note` only creates new Inbox seeds — editing a structured note from Claude.ai (desktop or mobile) was previously off-limits on conflict/correctness grounds. `propose_edit` closes that gap safely: `edits` is an ordered list of `{path, old, new}` find/replace triples, applied in-process against the vault mirror (each anchor must match exactly once per note), and written as a single git-format diff — a `Proposals/*.patch.md` artifact — never mutating the vault or invoking git itself. Edits across multiple paths in one call become one atomic proposal: `scripts/apply_proposals.py` only applies it if *every* file in the patch checks clean, so it's all-or-nothing, never partially applied.
 
 Proposals are applied out of band, model-free:
 

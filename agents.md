@@ -2,7 +2,7 @@
 
 ## What this is
 Self-hosted MCP server giving Claude mobile access to an Obsidian vault via 5 tools:
-`get_overview()` · `search(query)` · `read_note(path)` · `note(title, content)` · `propose_edit(path, edits, rationale)`
+`get_overview()` · `search(query)` · `read_note(path)` · `note(title, content)` · `propose_edit(edits, rationale)`
 
 Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid search.
 
@@ -28,6 +28,7 @@ Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid s
 - push-sync sidecar maintains its own independent `git clone` of the vault repo — it does not share the git-sync volume; it pulls before each push to avoid conflicts
 - SSH key for push-sync: K8s Secret volumes default to `0644` (world-readable), which SSH rejects — set `defaultMode: 0400` on the secret volume mount
 - `propose_edit`'s diff `index` line is always a dummy `0000000..0000000`, never a real git blob hash — a real hash lets `git apply --3way` find the historical blob and do a genuine content merge, which can silently write conflict markers on drift while `--check` reports it clean (verified: real hash + drifted target line = false-clean check, corrupted file on real apply). Dummy hash forces plain context matching: drift is rejected cleanly instead of merged
+- Multi-file proposals (F8) are atomic *only* because `scripts/apply_proposals.py` always runs `check()` (`git apply --3way --check`) before `apply_one()` and skips the apply entirely if check fails — `git apply` itself is NOT atomic across files in one patch (verified: with one drifted file among several, a bare `git apply` on the whole patch still mutates the earlier, non-drifted files before failing on the later one). Never call `apply_one()` without a preceding clean `check()` on the same patch
 
 ## Local dev
 ```bash

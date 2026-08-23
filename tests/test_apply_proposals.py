@@ -36,6 +36,73 @@ def _write_patch(repo: Path, rel_path: str, old: str, new: str, rationale: str =
     return patch
 
 
+def _init_multi_repo(tmp_path: Path, a_content: str, b_content: str) -> Path:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "config", "user.name", "Test")
+    (repo / "a.md").write_text(a_content)
+    (repo / "b.md").write_text(b_content)
+    _git(repo, "add", "a.md", "b.md")
+    _git(repo, "commit", "-q", "-m", "initial")
+    return repo
+
+
+def _write_multi_patch(repo: Path, files: list[tuple[str, str, str]], rationale: str = "r") -> Path:
+    # files: list of (rel_path, old, new)
+    proposals = repo / "Proposals"
+    proposals.mkdir(exist_ok=True)
+    diff = "".join(server._make_diff(rel_path, old, new) for rel_path, old, new in files)
+    header = ", ".join(rel_path for rel_path, _old, _new in files)
+    patch = proposals / "multi-abcd1234.patch.md"
+    patch.write_text(f"# Proposed edit: {header}\n\n{rationale}\n\n```diff\n{diff}```\n")
+    return patch
+
+
+def test_multi_file_patch_applies_both_files(tmp_path):
+    repo = _init_multi_repo(tmp_path, "alpha old\n", "beta old\n")
+    patch = _write_multi_patch(
+        repo, [("a.md", "alpha old\n", "alpha new\n"), ("b.md", "beta old\n", "beta new\n")]
+    )
+    assert apply_proposals.check(repo, patch) is True
+    ok, _stderr = apply_proposals.apply_one(repo, patch)
+    assert ok is True
+    assert (repo / "a.md").read_text() == "alpha new\n"
+    assert (repo / "b.md").read_text() == "beta new\n"
+
+
+def test_multi_file_patch_atomic_when_one_file_drifted(tmp_path):
+    # Regression: git apply is NOT atomic across files in one patch by itself —
+    # a bare `git apply` on this patch mutates a.md before failing on b.md.
+    # Atomicity here depends entirely on main() calling check() before
+    # apply_one() and skipping the apply outright when check fails.
+    repo = _init_multi_repo(tmp_path, "alpha old\n", "beta old\n")
+    patch = _write_multi_patch(
+        repo, [("a.md", "alpha old\n", "alpha new\n"), ("b.md", "beta old\n", "beta new\n")]
+    )
+    (repo / "b.md").write_text("beta DRIFTED\n")
+    _git(repo, "add", "b.md")
+    _git(repo, "commit", "-q", "-m", "drift b")
+
+    assert apply_proposals.check(repo, patch) is False
+
+    argv = sys.argv
+    sys.argv = ["apply_proposals.py", "--repo", str(repo), "--apply"]
+    try:
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = apply_proposals.main()
+    finally:
+        sys.argv = argv
+
+    assert code == 0
+    assert "SKIP (stale): multi-abcd1234.patch.md" in out.getvalue()
+    assert (repo / "a.md").read_text() == "alpha old\n"  # untouched, not partially applied
+    assert (repo / "b.md").read_text() == "beta DRIFTED\n"
+    assert patch.exists()
+
+
 def test_extract_diff_reads_fenced_block(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
     patch = _write_patch(repo, "note.md", "old text\n", "new text\n")

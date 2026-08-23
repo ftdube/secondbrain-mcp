@@ -3,6 +3,7 @@ set -eu
 
 OUTBOX="${OUTBOX_PATH:-/outbox}"
 INBOX="${NOTE_INBOX:-Inbox}"
+PROPOSALS="${PROPOSALS_DIR:-Proposals}"
 INTERVAL="${PUSH_SYNC_INTERVAL:-10}"
 BRANCH="${GIT_BRANCH:-main}"
 CLONE_DIR=/tmp/vault-repo
@@ -30,14 +31,18 @@ while true; do
   for f in "$OUTBOX"/*.md; do
     [ -f "$f" ] || continue
     filename=$(basename "$f")
+    case "$filename" in
+      *.patch.md) dest="$PROPOSALS"; label="proposal" ;;
+      *)          dest="$INBOX";     label="inbox" ;;
+    esac
     git -C "$CLONE_DIR" pull --rebase origin "$BRANCH"
-    mkdir -p "$CLONE_DIR/$INBOX"
-    cp "$f" "$CLONE_DIR/$INBOX/$filename"
-    git -C "$CLONE_DIR" add "$INBOX/$filename"
-    git -C "$CLONE_DIR" commit -m "inbox: ${filename%.md}"
+    mkdir -p "$CLONE_DIR/$dest"
+    cp "$f" "$CLONE_DIR/$dest/$filename"
+    git -C "$CLONE_DIR" add "$dest/$filename"
+    git -C "$CLONE_DIR" commit -m "$label: ${filename%.md}"
     git -C "$CLONE_DIR" push origin "$BRANCH"
     rm "$f"
-    echo "pushed $INBOX/$filename"
+    echo "pushed $dest/$filename"
   done
   sleep "$INTERVAL"
 done

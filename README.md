@@ -4,7 +4,7 @@ A self-hosted MCP server that gives the Claude mobile app (Android/iOS) access t
 
 ## Why
 
-Claude on desktop can navigate a vault via the filesystem MCP server. Mobile can't: the Claude app has no local filesystem access and the generic 11-tool filesystem server costs ~10k tokens per session. This server exposes exactly 4 tools, costs ~3k tokens per session, and runs on low-power hardware.
+Claude on desktop can navigate a vault via the filesystem MCP server. Mobile can't: the Claude app has no local filesystem access and the generic 11-tool filesystem server costs ~10k tokens per session. This server exposes exactly 5 tools, costs ~3.5k tokens per session, and runs on low-power hardware.
 
 ## How it works
 
@@ -25,7 +25,7 @@ git-sync sidecar      push-sync sidecar
   └──────── vault git repo ┘ ◄── Desktop Obsidian vault
 ```
 
-Four tools:
+Five tools:
 
 | Tool | Returns |
 |---|---|
@@ -33,6 +33,20 @@ Four tools:
 | `search(query)` | Top 5 FTS5 excerpts (path + heading + ~200 chars) |
 | `read_note(path)` | Full note by vault-relative path |
 | `note(title, content)` | Saves a draft note to `Inbox/` for later review in Obsidian |
+| `propose_edit(path, edits, rationale)` | Drafts a reviewable diff against an *existing* note, saved to `Proposals/` — never writes the vault directly |
+
+### Proposing edits to existing notes
+
+`note` only creates new Inbox seeds — editing a structured note from Claude.ai (desktop or mobile) was previously off-limits on conflict/correctness grounds. `propose_edit` closes that gap safely: it takes an ordered list of `{old, new}` find/replace pairs, applies them in-process against the vault mirror (each anchor must match exactly once), and writes a git-format diff as a `Proposals/*.patch.md` artifact — never mutating the vault or invoking git itself.
+
+Proposals are applied out of band, model-free:
+
+```bash
+make proposals VAULT_REPO=/path/to/your/vault/clone        # dry-run: CLEAN vs STALE
+make apply-proposals VAULT_REPO=/path/to/your/vault/clone  # git apply --3way, then delete applied patches
+```
+
+A stale proposal (the note drifted since drafting) is skipped, never force-applied or written with conflict markers. Applied edits land in the working tree uncommitted — review in Obsidian, then commit. See `agents.md` for the hard rule: applying a proposal is a command, never a conversation.
 
 ## Running locally
 
@@ -61,7 +75,7 @@ VAULT_PATH=/path/to/vault docker compose up mcp
 | `MCP_CLIENT_ID` | yes | OAuth client ID registered in Dex |
 | `MCP_BASE_URL` | yes | Public base URL of this server (for OAuth resource metadata) |
 | `DB_PATH` | no | SQLite database path (default: `/data/index.db`) |
-| `OUTBOX_PATH` | no | Directory where `note` writes files for push-sync (default: `/outbox`) |
+| `OUTBOX_PATH` | no | Directory where `note`/`propose_edit` write files for push-sync (default: `/outbox`) |
 | `AUTH_PUBLIC_EXTRA` | no | Comma-separated paths to add to the public (no-auth) list |
 
 ## Endpoints
@@ -83,6 +97,7 @@ The `/metrics` endpoint exposes Prometheus counters. Point a Prometheus scrape j
 | `mcp_overviews_total` | `get_overview` calls |
 | `mcp_searches_total` | `search` calls |
 | `mcp_reads_total` | `read_note` calls |
+| `mcp_propose_edits_total` | `propose_edit` calls |
 | `mcp_search_misses_total` | `search` calls that returned no results |
 | `mcp_overview_chars_total` | Characters returned by `get_overview` |
 | `mcp_search_chars_total` | Characters returned by `search` |
@@ -115,7 +130,7 @@ The `git-sync` sidecar polls the vault git repo every 5 minutes. The server dete
 
 **git-sync** uses the official [`registry.k8s.io/git-sync/git-sync`](https://github.com/kubernetes/git-sync) image. It clones the vault repo on startup and pulls every 5 minutes. The server detects the updated mtime and reindexes automatically.
 
-**push-sync** is a small custom sidecar (`./sidecars`) built on `alpine/git`. It watches `OUTBOX_PATH` for files written by the `note` tool, commits each to `NOTE_INBOX/` in the vault repo, and pushes. This keeps git out of the main server container.
+**push-sync** is a small custom sidecar (`./sidecars`) built on `alpine/git`. It watches `OUTBOX_PATH` for files written by the `note` and `propose_edit` tools, routes `*.patch.md` files to `PROPOSALS_DIR/` (default `Proposals`) and everything else to `NOTE_INBOX/` (default `Inbox`) in the vault repo, commits, and pushes. This keeps git out of the main server container.
 
 Both sidecars share `GIT_REPO_URL`, `GIT_BRANCH` (default: `main`), and the SSH key at `/ssh/id_ed25519` (configured via `SSH_KEY_PATH` in `.env`). See `compose.yaml` for the full configuration — it is the authoritative reference for sidecar env vars.
 

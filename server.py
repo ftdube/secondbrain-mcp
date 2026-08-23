@@ -1,19 +1,25 @@
 """
 SecondBrain MCP server — Phase 1a (FTS5 keyword search).
 
-Four tools:
-  get_overview()        — context.md + _map.md (session start)
-  search(query)         — FTS5 keyword search, top 5 excerpts
-  read_note(path)       — full note by vault-relative path
-  note(title, content)  — save a draft note to the vault inbox
+Five tools:
+  get_overview()               — context.md + _map.md (session start)
+  search(query)                — FTS5 keyword search, top 5 excerpts
+  read_note(path)               — full note by vault-relative path
+  note(title, content)          — save a draft note to the vault inbox
+  propose_edit(path, edits, rationale) — draft a reviewable diff against an existing note
 
 Auth: Bearer JWT issued by Dex (OAuth 2.1 / PKCE).
 Index: SQLite FTS5 with porter stemmer, rebuilt on startup and POST /reindex.
 Vault: mounted at VAULT_PATH (populated by a git-sync sidecar).
 Inbox: notes written to OUTBOX_PATH; push-sync sidecar commits and pushes them.
+Proposals: propose_edit also writes to OUTBOX_PATH (as *.patch.md); push-sync
+routes those to Proposals/ instead of Inbox/. Applied out of band via
+scripts/apply_proposals.py — never by a model. See agents.md.
 """
 
 import asyncio
+import difflib
+import hashlib
 from datetime import datetime
 import logging
 import os
@@ -105,11 +111,24 @@ SEARCH_MISSES   = Counter("mcp_search_misses_total",   "Search queries that retu
 NOTE_COUNTER    = Counter("mcp_notes_total",            "Total note tool calls")
 
 
+def _effective_vault() -> Path:
+    return VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
+
+
+def _resolve_in_vault(path: str) -> Path | None:
+    """Resolve a vault-relative path, rejecting traversal and symlink escape. None if outside the vault."""
+    effective = _effective_vault()
+    p = (effective / path).resolve()
+    if not p.is_relative_to(effective.resolve()):
+        return None
+    return p
+
+
 @mcp.tool()
 def get_overview() -> str:
     """Return context.md and _map.md to orient Claude at session start."""
     OVERVIEW_COUNTER.inc()
-    effective = VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
+    effective = _effective_vault()
     parts = []
     for name in ("context.md", "_map.md"):
         p = effective / name
@@ -166,9 +185,8 @@ def search(query: str) -> str:
 def read_note(path: str) -> str:
     """Read a full vault note by relative path (e.g. 'Homelab/Ocean/Summary.md')."""
     READ_COUNTER.inc()
-    effective = VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
-    p = (effective / path).resolve()
-    if not p.is_relative_to(effective.resolve()):
+    p = _resolve_in_vault(path)
+    if p is None:
         return f"Access denied: {path}"
     result = p.read_text() if p.exists() else f"Not found: {path}"
     READ_CHARS.inc(len(result))
@@ -193,6 +211,67 @@ def note(title: str, content: str) -> str:
         dest = OUTBOX_PATH / filename
     dest.write_text(f"# {title}\n\n{content}\n")
     return f"Saved to inbox: {filename}"
+
+
+PROPOSE_COUNTER = Counter("mcp_propose_edits_total", "Total propose_edit tool calls")
+
+
+def _make_diff(rel_path: str, old: str, new: str) -> str:
+    # index line uses a dummy 0000000 blob pair, not a real git hash-object id.
+    # A real id would let `git apply --3way` locate the historical blob and
+    # attempt a genuine content merge — which can silently succeed with
+    # conflict markers written into the note (and `--check` reports that as
+    # clean). The dummy id forces apply to fall back to plain context
+    # matching, so any drift is rejected cleanly instead of merged. See agents.md.
+    hunk = "".join(difflib.unified_diff(
+        old.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=f"a/{rel_path}",
+        tofile=f"b/{rel_path}",
+    ))
+    return (
+        f"diff --git a/{rel_path} b/{rel_path}\n"
+        f"index 0000000..0000000 100644\n"
+        f"{hunk}"
+    )
+
+
+@mcp.tool()
+def propose_edit(path: str, edits: list[dict[str, str]], rationale: str) -> str:
+    """Propose find/replace edits to an existing vault note as a reviewable diff. Never writes to the vault — for new notes use `note` instead."""
+    PROPOSE_COUNTER.inc()
+    p = _resolve_in_vault(path)
+    if p is None:
+        return f"Access denied: {path}"
+    if not p.exists():
+        return f"No such note: {path}. Use the note tool to create new notes — propose_edit only edits existing ones."
+
+    rel_path = p.relative_to(_effective_vault().resolve()).as_posix()
+    original = p.read_text()
+    content = original
+    for i, edit in enumerate(edits, start=1):
+        old, new = edit["old"], edit["new"]
+        count = content.count(old)
+        if count == 0:
+            return f"Edit {i} failed: anchor not found in {path}."
+        if count > 1:
+            return f"Edit {i} failed: anchor matches {count} times in {path}, must match exactly once."
+        content = content.replace(old, new, 1)
+
+    if content == original:
+        return f"No changes: edits produce identical content for {path}."
+
+    diff = _make_diff(rel_path, original, content)
+    digest = hashlib.sha256((rel_path + content).encode()).hexdigest()[:8]
+    slug = re.sub(r"[^\w-]", "-", Path(rel_path).stem)
+    filename = f"{slug}-{digest}.patch.md"
+
+    OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
+    dest = OUTBOX_PATH / filename
+    if dest.exists():
+        return f"Already proposed (unchanged): {filename}"
+    dest.write_text(f"# Proposed edit: {rel_path}\n\n{rationale}\n\n```diff\n{diff}```\n")
+    return f"Proposed: {filename}"
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -259,7 +338,7 @@ async def _vault_watcher() -> None:
         try:
             mtime = max(
                 f.stat().st_mtime
-                for f in (VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH).rglob("*.md")
+                for f in _effective_vault().rglob("*.md")
                 if "Chat Archive" not in str(f)
             )
             if mtime > last:

@@ -42,6 +42,7 @@ services:
       GIT_SSH_KEY_PATH: /ssh/id_ed25519
       OUTBOX_PATH: /outbox
       NOTE_INBOX: Inbox
+      PROPOSALS_DIR: Proposals
       PUSH_SYNC_INTERVAL: "10"
     volumes:
       - mcp-outbox:/outbox

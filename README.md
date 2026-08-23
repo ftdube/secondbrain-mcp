@@ -30,7 +30,7 @@ Five tools:
 | Tool | Returns |
 |---|---|
 | `get_overview()` | `context.md` + `_map.md` — called once per session |
-| `search(query)` | Top 5 FTS5 excerpts (path + heading + ~200 chars) |
+| `search(query)` | Top 10 FTS5 excerpts (path + heading + ~200 chars) |
 | `read_note(path)` | Full note by vault-relative path |
 | `note(title, content)` | Saves a draft note to `Inbox/` for later review in Obsidian |
 | `propose_edit(edits, rationale)` | Drafts a reviewable diff against one or more *existing* notes, saved to `Proposals/` — never writes the vault directly |

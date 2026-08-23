@@ -3,7 +3,7 @@ SecondBrain MCP server — Phase 1a (FTS5 keyword search).
 
 Five tools:
   get_overview()               — context.md + _map.md (session start)
-  search(query)                — FTS5 keyword search, top 5 excerpts
+  search(query)                — FTS5 keyword search, top 10 excerpts
   read_note(path)               — full note by vault-relative path
   note(title, content)          — save a draft note to the vault inbox
   propose_edit(edits, rationale) — draft a reviewable diff against one or more existing notes, atomically
@@ -141,7 +141,7 @@ def get_overview() -> str:
 
 @mcp.tool()
 def search(query: str) -> str:
-    """Search the vault. Returns up to 5 excerpts (path, heading, 200-char snippet)."""
+    """Search the vault. Returns up to 10 excerpts (path, heading, 200-char snippet)."""
     SEARCH_COUNTER.inc()
     conn = sqlite3.connect(DB_PATH)
     try:

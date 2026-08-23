@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.2 (Draft) |
+| Document version | 1.3 (Draft) |
 | System / API version documented | 1.1.0 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
@@ -19,6 +19,7 @@
 | 1.0 | 2026-08-23 | Claude Code | Initial issue. Covers the Phase 1a service (`get_overview`, `search`, `read_note`, `note`) plus `propose_edit` (including F8 multi-file atomic proposals), authentication, and common cross-tool requirements. |
 | 1.1 | 2026-08-23 | Claude Code | Coverage audit: added §9.9 (Indexing & Chunking, `IDX`) to give the previously-untraced `_iter_chunks`/`build_index` behavior its own requirement IDs; reworked §16 RTM into an index pointing at inline `# BRD:` traceability comments now present in every `tests/test_*.py` test function; added OI-7..OI-10 for coverage gaps found during the audit (counters never asserted, the primary vault-symlink branch never exercised, `get_overview`'s exact heading/separator format never asserted, wholesale-reindex-clears-stale-rows never proven). No requirement's *content* changed — this revision only adds requirements and corrects traceability claims. |
 | 1.2 | 2026-08-23 | Claude Code | Resolved the `search` result-count discrepancy (RISK-1/OI-1): `server.py`'s docstring and `README.md` now say 10, matching the actual `LIMIT` and `FR-SRCH-2` — no runtime behavior changed. Added `NFR-PROP-10`, the Prometheus-counter requirement for `propose_edit` that was missing despite the counter existing in code since v1.1; updated §13's source reference accordingly. Added §9.10 Vault Path Blacklist (`BLK`, FR-BLK-1..5, NFR-BLK-1..3), a **not-yet-implemented** operator-requested capability to exclude configured vault subdirectories from `search` and `read_note`; flagged its interaction with `propose_edit` (deliberately out of scope) as OI-11 rather than resolving it unilaterally. |
+| 1.3 | 2026-08-23 | Claude Code | Resolved OI-11 per operator follow-up: `propose_edit` now SHALL honor `VAULT_BLACKLIST` too (FR-BLK-5 rewritten from "explicitly out of scope" to a requirement). Directed enforcement into the `_resolve_in_vault` helper shared by `read_note` and `propose_edit` (NFR-BLK-3 rewritten) rather than adding a second, independent check — same behavior, one implementation instead of two that could drift apart. |
 
 ### Approval
 
@@ -337,19 +338,17 @@ Added in this revision (v1.1 of this document): `_iter_chunks` and `build_index`
 
 ### 9.10 Vault Path Blacklist (`BLK`)
 
-Added in document v1.2, proposed by the operator: today, `Chat Archive` directories are the only excluded content, and that exclusion only applies to indexing (FR-IDX-4) — `read_note` and `propose_edit` can still read anything under `Chat Archive`, per §10's existing note that "indexing exclusion is not an access-control boundary." This section specifies a general, operator-configured blacklist that closes that gap for a configurable set of subdirectories, for `search` and `read_note` specifically. **Not yet implemented** — this is a requirements-only addition in this revision, scoped and written to be built against.
+Added in document v1.2, proposed by the operator: today, `Chat Archive` directories are the only excluded content, and that exclusion only applies to indexing (FR-IDX-4) — `read_note` and `propose_edit` can still read anything under `Chat Archive`, per §10's existing note that "indexing exclusion is not an access-control boundary." This section specifies a general, operator-configured blacklist that closes that gap for a configurable set of subdirectories, for `search`, `read_note`, and `propose_edit`. **Not yet implemented** — this is a requirements-only addition in this revision, scoped and written to be built against.
 
 **Functional**
 
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
-| FR-BLK-1 | The server SHALL support an operator-configured list of vault-relative directory prefixes — proposed as a comma-separated `VAULT_BLACKLIST` environment variable, mirroring the existing `AUTH_PUBLIC_EXTRA` convention (FR-AUTH-2) — that are excluded from indexing and from `read_note`. | Must | Not implemented — proposed |
+| FR-BLK-1 | The server SHALL support an operator-configured list of vault-relative directory prefixes — proposed as a comma-separated `VAULT_BLACKLIST` environment variable, mirroring the existing `AUTH_PUBLIC_EXTRA` convention (FR-AUTH-2) — that are excluded from indexing, `read_note`, and `propose_edit`. | Must | Not implemented — proposed |
 | FR-BLK-2 | `search` SHALL NOT return excerpts from any note under a blacklisted prefix. Enforcement SHALL happen at index-build time (the note is never indexed), the same mechanism `FR-IDX-4` already uses for `Chat Archive` — `VAULT_BLACKLIST` is additive to, not a replacement for, the existing hardcoded `Chat Archive` exclusion. | Must | Not implemented — proposed |
 | FR-BLK-3 | `read_note` SHALL return `"Access denied: {path}"` — the same response `FR-READ-2` already uses for an out-of-bounds path — for any in-bounds path under a blacklisted prefix, rather than the file's content. Reusing that exact message is deliberate: a blacklisted path and a genuinely out-of-bounds path SHOULD be indistinguishable to the caller. | Must | Not implemented — proposed |
 | FR-BLK-4 | Blacklist entries SHALL be matched as a path-segment prefix against the note's path relative to the effective vault root — e.g. an entry of `Health/Psychology` excludes everything under `Health/Psychology/`, but SHALL NOT exclude a sibling like `Health/PsychologyNotes.md`. | Must | Not implemented — proposed |
-| FR-BLK-5 | `propose_edit` is explicitly **out of scope** for this blacklist in this revision — a blacklisted note remains fully proposable. This is a deliberate scope decision (the operator's request named `search` and `read` only), not an oversight; see the note below. | Must (as scoped) | N/A — deliberately excluded |
-
-> **Open question carried forward, not resolved here:** FR-BLK-5 means a note can be simultaneously unreadable via `read_note` and yet still editable via `propose_edit` (which reads the same file directly from the vault mirror, bypassing `read_note` entirely). Whether that's the intended posture — e.g. a "don't surface this in casual reads, but AI-drafted edits are still fine" policy — or an inconsistency to close later is an operator decision, not a documentation one. Flagged as OI-11.
+| FR-BLK-5 | `propose_edit` SHALL also honor the blacklist: a blacklisted path SHALL be treated as out-of-bounds by the same shared path-resolution step `read_note` and `propose_edit` already both call (`_resolve_in_vault`, FR-COM-1), returning `"Access denied: {path}"` — consistent with FR-BLK-3, and *not* fully proposable as an earlier draft of this requirement had it. See NFR-BLK-3 for why this belongs in the shared helper rather than duplicated per tool. | Must | Not implemented — proposed |
 
 **Non-Functional**
 
@@ -357,7 +356,7 @@ Added in document v1.2, proposed by the operator: today, `Chat Archive` director
 |---|---|---|---|
 | NFR-BLK-1 | Blacklist configuration changes SHALL take effect on the next reindex, consistent with the existing freshness bound (NFR-COM-5) — no separate config-reload mechanism is required since reindexing already runs on a schedule and on `POST /reindex`. | Should | Not implemented — proposed |
 | NFR-BLK-2 | An empty or unset `VAULT_BLACKLIST` SHALL be exactly equivalent to today's behavior (only the hardcoded `Chat Archive` exclusion applies) — the feature SHALL be backward compatible by default. | Must | Not implemented — proposed |
-| NFR-BLK-3 | Blacklist filtering SHALL be applied *after* the existing traversal-safe path resolution (FR-COM-1) succeeds, as an additional filter — never as a replacement for it, and never in a way that weakens FR-COM-1's traversal/symlink-escape guarantee. | Must | Not implemented — proposed |
+| NFR-BLK-3 | Blacklist filtering SHALL be implemented as an extension of `_resolve_in_vault` itself (the function backing FR-COM-1), applied *after* the existing traversal-safe path resolution succeeds — never as a replacement for it, and never in a way that weakens FR-COM-1's traversal/symlink-escape guarantee. Placing it in the shared helper, rather than duplicating a check inside `read_note` and `propose_edit` separately, is what makes FR-BLK-5 fall out for free instead of needing its own independent enforcement path that could drift out of sync with FR-BLK-3. | Must | Not implemented — proposed |
 
 ## 10. Data Requirements
 
@@ -475,7 +474,7 @@ RISK-5's mitigation cites `test_multi_file_patch_atomic_when_one_file_drifted` b
 | OI-8 | No test exercises the primary `VAULT_PATH/vault` branch (the git-sync symlink target) of the effective-vault-root resolution used by `_effective_vault`/`_resolve_in_vault` (FR-COM-4) or `build_index`'s parallel copy of the same fallback logic. Every existing test sets `VAULT_PATH` to a bare directory with no nested `vault/` subdirectory, so only the fallback branch has ever run under test. | Add one test per affected function that creates `VAULT_PATH/vault/` and confirms that path — not `VAULT_PATH` itself — is what gets read from. |
 | OI-9 | `get_overview`'s exact `## <filename>` heading and `\n\n---\n\n` separator formatting (FR-OVW-2) is not asserted by any test; `test_get_overview_both_files` only checks that both files' *content* appears somewhere in the result. | Add an exact-match or regex assertion on the heading/separator formatting, not just substring containment. |
 | OI-10 | FR-IDX-5 (wholesale, non-incremental reindex) has no test proving a *second* `build_index` call actually clears rows from a prior run; existing tests only call it once per test and assert the resulting chunk count. | Add a test that indexes vault A, then vault B, and asserts vault A's chunks are gone — not just that vault B's are present. |
-| OI-11 | §9.10's `VAULT_BLACKLIST` (FR-BLK-1..5) deliberately excludes `propose_edit` from enforcement (FR-BLK-5): once built, a note could be simultaneously hidden from `read_note`/`search` yet still editable via `propose_edit`, which reads the vault mirror directly. | Operator decision, not a documentation fix: confirm whether that split posture is intended before or shortly after implementing §9.10, and update FR-BLK-5's status accordingly either way. |
+| OI-11 | *(Resolved in document v1.3)* An earlier draft of §9.10 deliberately excluded `propose_edit` from `VAULT_BLACKLIST` enforcement, which would have let a note be simultaneously hidden from `read_note`/`search` yet still editable via `propose_edit`. | **Resolved** — operator confirmed `propose_edit` should also honor the blacklist. FR-BLK-5 now requires it, enforced via the same shared `_resolve_in_vault` helper `read_note` already uses (NFR-BLK-3), so both tools inherit one implementation instead of two that could drift apart. |
 
 ## 18. Appendices
 

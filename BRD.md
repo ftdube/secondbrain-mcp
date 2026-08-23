@@ -10,7 +10,7 @@
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
 | Classification | Public (repository is open-source; see §6 for redaction policy) |
-| Related artifacts | [`openapi.yaml`](openapi.yaml), [`agents.md`](agents.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md) |
+| Related artifacts | [`agents.md`](agents.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md) |
 
 ### Revision History
 
@@ -33,7 +33,7 @@ This is a solo-maintainer, self-hosted personal project rather than an enterpris
 
 SecondBrain MCP is a self-hosted [Model Context Protocol](https://modelcontextprotocol.io) (MCP) server that gives the Claude mobile and desktop apps read, keyword-search, and gated-write access to a personal Obsidian-format knowledge vault, without exposing a generic filesystem interface and without replicating the vault's contents off the operator's own infrastructure.
 
-The service is deliberately minimal: five MCP tools, a SQLite FTS5 keyword index, and OAuth 2.1/PKCE authentication delegated to a self-hosted Dex instance. This document formalizes the business and product requirements behind that design, states them as testable functional (FR) and non-functional (NFR) requirements per tool, and cross-references the accompanying [`openapi.yaml`](openapi.yaml) contract for the service's literal HTTP surface.
+The service is deliberately minimal: five MCP tools, a SQLite FTS5 keyword index, and OAuth 2.1/PKCE authentication delegated to a self-hosted Dex instance. This document formalizes the business and product requirements behind that design and states them as testable functional (FR) and non-functional (NFR) requirements per tool.
 
 This revision (v1.1.0) adds the fifth tool, `propose_edit` — a gated, human-reviewed pipeline for editing *existing* vault notes, closing a capability gap left by the original four read/create-only tools.
 
@@ -355,15 +355,11 @@ This service's HTTP surface is a mix of (a) fixed-convention operational endpoin
 | `/.well-known/oauth-protected-resource` | **Unversioned, fixed by spec.** | RFC 9728 defines this exact path; it is not this service's to version. |
 | `/reindex` | **Unversioned.** | Internal operational trigger, not a public data contract. |
 | MCP tool surface (`tools/list` / `tools/call`) | **Versioned per-tool, additively.** Adding a tool (like `propose_edit` in this revision) is a MINOR bump. A breaking change to an existing tool's arguments or return contract would ship as a **new tool name** (e.g. `propose_edit_v2`) rather than mutate the existing contract, so already-deployed clients never silently break. | MCP has no native URL-path versioning; the tool name *is* the addressable unit. |
-| This document + `openapi.yaml` | **Semantic versioning via `info.version`.** MAJOR for any breaking tool contract change or tool removal; MINOR for an additive tool or field; PATCH for description/documentation fixes with no behavior change. | Gives operators and reviewers a single number to diff against when the service changes. |
+| This document | **Semantic versioning via the "System / API version documented" field in Document Control.** MAJOR for any breaking tool contract change or tool removal; MINOR for an additive tool or field; PATCH for description/documentation fixes with no behavior change. | Gives operators and reviewers a single number to diff against when the service changes. |
 
 Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** — this revision — adds `propose_edit` (including F8) as a strictly additive, non-breaking capability. No existing tool's contract changed.
 
-Separately, the **MCP protocol version** itself (negotiated during the `initialize` handshake, e.g. a dated string such as `2025-06-18`) is orthogonal to this service's own `info.version` and is determined by the installed `fastmcp`/MCP SDK version, not by this document — the two SHOULD NOT be conflated in future revisions.
-
-### 11.4 Related Artifact
-
-The literal REST endpoints in §11.1 are authoritatively documented in [`openapi.yaml`](openapi.yaml). The MCP JSON-RPC endpoint is documented there on a best-effort basis; see that file's top-level `description` for the specific modeling trade-offs made (OpenAPI's type system does not cleanly express JSON-RPC's method-dependent polymorphism).
+Separately, the **MCP protocol version** itself (negotiated during the `initialize` handshake, e.g. a dated string such as `2025-06-18`) is orthogonal to this service's own version number and is determined by the installed `fastmcp`/MCP SDK version, not by this document — the two SHOULD NOT be conflated in future revisions.
 
 ## 12. Security & Compliance Requirements
 
@@ -436,7 +432,7 @@ Full traceability is given for `propose_edit` and the common path-safety require
 | OI-2 | `read_note` has no size cap (NFR-READ-2, RISK-2). | If large notes become a real problem in practice, add a truncation with an explicit `"...(truncated, N bytes total)"` marker rather than a silent cutoff. |
 | OI-3 | `apply_proposals.py` has no concurrency guard (RISK-7). | Add a simple lockfile (e.g. `flock` on a file in the vault repo) before treating concurrent invocations as safe. |
 | OI-4 | `BearerAuthMiddleware` / JWT validation has zero automated test coverage (RISK-8). | Add tests using a fixture-generated RSA keypair and a mocked `PyJWKClient` before relying on FR-AUTH-* as verified rather than merely implemented. |
-| OI-5 | The exact MCP transport mount path (documented in `openapi.yaml` as `/mcp`) is not pinned by any test; it depends on the installed `fastmcp` version's `http_app()` behavior, mirroring the existing gotcha already noted in `agents.md` about the method name itself. | Add a smoke test asserting the actually-served path, or pin the `fastmcp` version. |
+| OI-5 | The exact MCP transport mount path (referred to in §11.1 as `/mcp`) is not pinned by any test; it depends on the installed `fastmcp` version's `http_app()` behavior, mirroring the existing gotcha already noted in `agents.md` about the method name itself. | Add a smoke test asserting the actually-served path, or pin the `fastmcp` version. |
 | OI-6 | `note` has no dedicated automated test (unlike `propose_edit`, `read_note`, `search`, `get_overview`). | Add `test_note_*` cases mirroring the existing style in `tests/test_server.py`. |
 
 ## 18. Appendices
@@ -446,7 +442,6 @@ Full traceability is given for `propose_edit` and the common path-safety require
 - [`agents.md`](agents.md) — hard rules and non-obvious operational gotchas (token-budget-constrained, kept minimal by design; this document is the expanded, unconstrained counterpart)
 - [`README.md`](README.md) — user-facing setup and architecture summary
 - [`next-steps.md`](next-steps.md) — phase roadmap, trigger conditions, and the `propose_edit` implementation history (including both correctness fixes referenced in NFR-PROP-8/9)
-- [`openapi.yaml`](openapi.yaml) — the accompanying API contract (§11.4)
 - The original `propose_edit` design note (vault `Inbox/propose_edit-pipeline---concept-requirements-validation.md`) — the source of the F1–F8/N1–N7 requirement IDs preserved in §9.7
 
 ### Appendix B — Out-of-Band Design Decisions Superseded by This Document

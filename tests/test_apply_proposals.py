@@ -60,6 +60,7 @@ def _write_multi_patch(repo: Path, files: list[tuple[str, str, str]], rationale:
     return patch
 
 
+# BRD: FR-PROP-8, NFR-PROP-8
 def test_multi_file_patch_applies_both_files(tmp_path):
     repo = _init_multi_repo(tmp_path, "alpha old\n", "beta old\n")
     patch = _write_multi_patch(
@@ -72,6 +73,7 @@ def test_multi_file_patch_applies_both_files(tmp_path):
     assert (repo / "b.md").read_text() == "beta new\n"
 
 
+# BRD: FR-PROP-8, NFR-PROP-8 (also the regression test cited by RISK-5's mitigation)
 def test_multi_file_patch_atomic_when_one_file_drifted(tmp_path):
     # Regression: git apply is NOT atomic across files in one patch by itself —
     # a bare `git apply` on this patch mutates a.md before failing on b.md.
@@ -103,6 +105,7 @@ def test_multi_file_patch_atomic_when_one_file_drifted(tmp_path):
     assert patch.exists()
 
 
+# BRD: FR-PROP-4 (parsing counterpart of the artifact format)
 def test_extract_diff_reads_fenced_block(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
     patch = _write_patch(repo, "note.md", "old text\n", "new text\n")
@@ -112,12 +115,14 @@ def test_extract_diff_reads_fenced_block(tmp_path):
     assert "+new text" in diff
 
 
+# BRD: NFR-PROP-3
 def test_check_clean_when_note_unchanged(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
     patch = _write_patch(repo, "note.md", "old text\n", "new text\n")
     assert apply_proposals.check(repo, patch) is True
 
 
+# BRD: NFR-PROP-3, NFR-PROP-9
 def test_check_stale_when_note_drifted(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
     patch = _write_patch(repo, "note.md", "old text\n", "new text\n")
@@ -127,6 +132,7 @@ def test_check_stale_when_note_drifted(tmp_path):
     assert apply_proposals.check(repo, patch) is False
 
 
+# BRD: NFR-PROP-9, NFR-PROP-3, NFR-PROP-2
 def test_drifted_apply_never_writes_conflict_markers(tmp_path):
     # Regression: a real (non-dummy) index hash lets `git apply --3way` locate
     # the historical blob and silently 3-way-merge, writing <<<<<<< conflict
@@ -145,6 +151,7 @@ def test_drifted_apply_never_writes_conflict_markers(tmp_path):
     assert "<<<<<<<" not in (repo / "note.md").read_text()
 
 
+# BRD: FR-PROP-5, NFR-PROP-2
 def test_apply_one_updates_file_and_leaves_it_uncommitted(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
     patch = _write_patch(repo, "note.md", "old text\n", "new text\n")
@@ -155,6 +162,7 @@ def test_apply_one_updates_file_and_leaves_it_uncommitted(tmp_path):
     assert "note.md" in status  # modified, not committed
 
 
+# BRD: FR-PROP-5
 def test_main_apply_deletes_applied_patch(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
     clean_patch = _write_patch(repo, "note.md", "old text\n", "new text\n")
@@ -173,6 +181,7 @@ def test_main_apply_deletes_applied_patch(tmp_path):
     assert not clean_patch.exists()
 
 
+# BRD: FR-PROP-5, NFR-PROP-3
 def test_main_dry_run_reports_stale_without_applying(tmp_path):
     repo = _init_repo(tmp_path, "old text\n")
     stale_patch = _write_patch(repo, "note.md", "old text\n", "new text\n")

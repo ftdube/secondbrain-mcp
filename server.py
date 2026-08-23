@@ -1,32 +1,39 @@
 """
 SecondBrain MCP server — Phase 1a (FTS5 keyword search).
 
-Four tools:
-  get_overview()        — context.md + _map.md (session start)
-  search(query)         — FTS5 keyword search, top 5 excerpts
-  read_note(path)       — full note by vault-relative path
-  note(title, content)  — save a draft note to the vault inbox
+Five tools:
+  get_overview()               — context.md + _map.md (session start)
+  search(query)                — FTS5 keyword search, top 5 excerpts
+  read_note(path)               — full note by vault-relative path
+  note(title, content)          — save a draft note to the vault inbox
+  propose_edit(edits, rationale) — draft a reviewable diff against one or more existing notes, atomically
 
 Auth: Bearer JWT issued by Dex (OAuth 2.1 / PKCE).
 Index: SQLite FTS5 with porter stemmer, rebuilt on startup and POST /reindex.
 Vault: mounted at VAULT_PATH (populated by a git-sync sidecar).
 Inbox: notes written to OUTBOX_PATH; push-sync sidecar commits and pushes them.
+Proposals: propose_edit also writes to OUTBOX_PATH (as *.patch.md); push-sync
+routes those to Proposals/ instead of Inbox/. Applied out of band via
+scripts/apply_proposals.py — never by a model. See agents.md.
 """
 
 import asyncio
-from datetime import datetime
+import difflib
+import hashlib
 import logging
 import os
 import re
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
 
 import uvicorn
 from fastmcp import FastMCP
-from jwt import PyJWKClient, decode as jwt_decode, PyJWTError
-from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+from jwt import PyJWKClient, PyJWTError
+from jwt import decode as jwt_decode
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -81,8 +88,7 @@ def build_index(vault_path: Path, db_path: Path) -> int:
         rel = str(md.relative_to(effective))
         if "Chat Archive" in rel:
             continue
-        for chunk in _iter_chunks(rel, md.read_text(errors="replace")):
-            rows.append(chunk)
+        rows.extend(_iter_chunks(rel, md.read_text(errors="replace")))
     conn.executemany("INSERT INTO chunks_fts VALUES (?, ?, ?)", rows)
     conn.commit()
     conn.close()
@@ -105,11 +111,24 @@ SEARCH_MISSES   = Counter("mcp_search_misses_total",   "Search queries that retu
 NOTE_COUNTER    = Counter("mcp_notes_total",            "Total note tool calls")
 
 
+def _effective_vault() -> Path:
+    return VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
+
+
+def _resolve_in_vault(path: str) -> Path | None:
+    """Resolve a vault-relative path, rejecting traversal and symlink escape. None if outside the vault."""
+    effective = _effective_vault()
+    p = (effective / path).resolve()
+    if not p.is_relative_to(effective.resolve()):
+        return None
+    return p
+
+
 @mcp.tool()
 def get_overview() -> str:
     """Return context.md and _map.md to orient Claude at session start."""
     OVERVIEW_COUNTER.inc()
-    effective = VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
+    effective = _effective_vault()
     parts = []
     for name in ("context.md", "_map.md"):
         p = effective / name
@@ -166,9 +185,8 @@ def search(query: str) -> str:
 def read_note(path: str) -> str:
     """Read a full vault note by relative path (e.g. 'Homelab/Ocean/Summary.md')."""
     READ_COUNTER.inc()
-    effective = VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
-    p = (effective / path).resolve()
-    if not p.is_relative_to(effective.resolve()):
+    p = _resolve_in_vault(path)
+    if p is None:
         return f"Access denied: {path}"
     result = p.read_text() if p.exists() else f"Not found: {path}"
     READ_CHARS.inc(len(result))
@@ -189,10 +207,97 @@ def note(title: str, content: str) -> str:
     filename = _note_filename(title)
     dest = OUTBOX_PATH / filename
     if dest.exists():
-        filename = f"{filename[:-3]}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+        filename = f"{filename[:-3]}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.md"
         dest = OUTBOX_PATH / filename
     dest.write_text(f"# {title}\n\n{content}\n")
     return f"Saved to inbox: {filename}"
+
+
+PROPOSE_COUNTER = Counter("mcp_propose_edits_total", "Total propose_edit tool calls")
+
+
+def _make_diff(rel_path: str, old: str, new: str) -> str:
+    # index line uses a dummy 0000000 blob pair, not a real git hash-object id.
+    # A real id would let `git apply --3way` locate the historical blob and
+    # attempt a genuine content merge — which can silently succeed with
+    # conflict markers written into the note (and `--check` reports that as
+    # clean). The dummy id forces apply to fall back to plain context
+    # matching, so any drift is rejected cleanly instead of merged. See agents.md.
+    hunk = "".join(difflib.unified_diff(
+        old.splitlines(keepends=True),
+        new.splitlines(keepends=True),
+        fromfile=f"a/{rel_path}",
+        tofile=f"b/{rel_path}",
+    ))
+    return (
+        f"diff --git a/{rel_path} b/{rel_path}\n"
+        f"index 0000000..0000000 100644\n"
+        f"{hunk}"
+    )
+
+
+@mcp.tool()
+def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
+    """Propose find/replace edits to one or more existing vault notes as a single reviewable diff. Each edit is {path, old, new}; edits sharing a path apply in order. Multiple paths in one call become one atomic proposal — applied all together or not at all. Never writes to the vault — for new notes use `note` instead."""
+    PROPOSE_COUNTER.inc()
+    if not edits:
+        return "No edits provided."
+
+    paths: list[str] = []
+    for edit in edits:
+        if edit["path"] not in paths:
+            paths.append(edit["path"])
+
+    # path -> (rel_path, original, edited content)
+    results: dict[str, tuple[str, str, str]] = {}
+    for path in paths:
+        p = _resolve_in_vault(path)
+        if p is None:
+            return f"Access denied: {path}"
+        if not p.exists():
+            return f"No such note: {path}. Use the note tool to create new notes — propose_edit only edits existing ones."
+
+        rel_path = p.relative_to(_effective_vault().resolve()).as_posix()
+        content = original = p.read_text()
+        i = 0
+        for edit in edits:
+            if edit["path"] != path:
+                continue
+            i += 1
+            old, new = edit["old"], edit["new"]
+            count = content.count(old)
+            if count == 0:
+                return f"Edit {i} for {path} failed: anchor not found."
+            if count > 1:
+                return f"Edit {i} for {path} failed: anchor matches {count} times, must match exactly once."
+            content = content.replace(old, new, 1)
+        results[path] = (rel_path, original, content)
+
+    changed_paths = [path for path in paths if results[path][1] != results[path][2]]
+    if not changed_paths:
+        return "No changes: edits produce identical content for all paths."
+
+    diff_parts, digest_parts, rel_paths = [], [], []
+    for path in changed_paths:
+        rel_path, original, content = results[path]
+        diff_parts.append(_make_diff(rel_path, original, content))
+        digest_parts.append(rel_path + content)
+        rel_paths.append(rel_path)
+    diff = "".join(diff_parts)
+    digest = hashlib.sha256("".join(digest_parts).encode()).hexdigest()[:8]
+
+    slug = re.sub(r"[^\w-]", "-", Path(rel_paths[0]).stem)
+    if len(rel_paths) > 1:
+        slug += "-multi"
+    filename = f"{slug}-{digest}.patch.md"
+
+    OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
+    dest = OUTBOX_PATH / filename
+    if dest.exists():
+        return f"Already proposed (unchanged): {filename}"
+    header = ", ".join(rel_paths)
+    dest.write_text(f"# Proposed edit: {header}\n\n{rationale}\n\n```diff\n{diff}```\n")
+    return f"Proposed: {filename}"
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
@@ -259,7 +364,7 @@ async def _vault_watcher() -> None:
         try:
             mtime = max(
                 f.stat().st_mtime
-                for f in (VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH).rglob("*.md")
+                for f in _effective_vault().rglob("*.md")
                 if "Chat Archive" not in str(f)
             )
             if mtime > last:

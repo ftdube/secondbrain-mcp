@@ -151,3 +151,176 @@ def test_get_overview_no_files(tmp_path, monkeypatch):
     vault.mkdir()
     monkeypatch.setattr(server, "VAULT_PATH", vault)
     assert server.get_overview() == "Vault unavailable."
+
+
+# ── propose_edit ──────────────────────────────────────────────────────────────
+
+def _propose_setup(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outbox = tmp_path / "outbox"
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+    monkeypatch.setattr(server, "OUTBOX_PATH", outbox)
+    return vault, outbox
+
+
+def test_propose_edit_writes_proposal(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("# Note\n\nold text\n")
+
+    result = server.propose_edit(
+        [{"path": "note.md", "old": "old text", "new": "new text"}], "fix wording"
+    )
+
+    assert result.startswith("Proposed: ")
+    files = list(outbox.glob("*.patch.md"))
+    assert len(files) == 1
+    body = files[0].read_text()
+    assert "note.md" in body
+    assert "fix wording" in body
+    assert "```diff" in body
+    assert "-old text" in body
+    assert "+new text" in body
+
+
+def test_propose_edit_no_edits(tmp_path, monkeypatch):
+    _propose_setup(tmp_path, monkeypatch)
+    assert server.propose_edit([], "r") == "No edits provided."
+
+
+def test_propose_edit_anchor_not_found(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("content")
+
+    result = server.propose_edit([{"path": "note.md", "old": "missing", "new": "x"}], "r")
+
+    assert "not found" in result
+    assert list(outbox.glob("*.patch.md")) == []
+
+
+def test_propose_edit_anchor_ambiguous(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("dup dup")
+
+    result = server.propose_edit([{"path": "note.md", "old": "dup", "new": "x"}], "r")
+
+    assert "matches 2 times" in result
+    assert list(outbox.glob("*.patch.md")) == []
+
+
+def test_propose_edit_missing_note_routes_to_note_tool(tmp_path, monkeypatch):
+    _propose_setup(tmp_path, monkeypatch)
+
+    result = server.propose_edit([{"path": "missing.md", "old": "a", "new": "b"}], "r")
+
+    assert "No such note" in result
+    assert "note tool" in result
+
+
+def test_propose_edit_path_traversal_blocked(tmp_path, monkeypatch):
+    _propose_setup(tmp_path, monkeypatch)
+
+    result = server.propose_edit([{"path": "../../etc/passwd", "old": "a", "new": "b"}], "r")
+    assert result == "Access denied: ../../etc/passwd"
+
+
+def test_propose_edit_no_changes(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("same")
+
+    result = server.propose_edit([{"path": "note.md", "old": "same", "new": "same"}], "r")
+
+    assert result.startswith("No changes")
+    assert list(outbox.glob("*.patch.md")) == []
+
+
+def test_propose_edit_idempotent(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("old")
+
+    edits = [{"path": "note.md", "old": "old", "new": "new"}]
+    first = server.propose_edit(edits, "r")
+    second = server.propose_edit(edits, "r")
+
+    assert first.startswith("Proposed: ")
+    assert second.startswith("Already proposed")
+    assert len(list(outbox.glob("*.patch.md"))) == 1
+
+
+def test_propose_edit_sequential_edits_applied_in_order(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("one two\n")
+
+    result = server.propose_edit(
+        [
+            {"path": "note.md", "old": "one", "new": "1"},
+            {"path": "note.md", "old": "two", "new": "2"},
+        ],
+        "r",
+    )
+
+    assert result.startswith("Proposed: ")
+    body = next(outbox.glob("*.patch.md")).read_text()
+    assert "+1 2" in body
+
+
+# ── propose_edit: multi-file (F8) ────────────────────────────────────────────
+
+def test_propose_edit_multi_file_writes_one_combined_patch(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "a.md").write_text("alpha old\n")
+    (vault / "b.md").write_text("beta old\n")
+
+    result = server.propose_edit(
+        [
+            {"path": "a.md", "old": "alpha old", "new": "alpha new"},
+            {"path": "b.md", "old": "beta old", "new": "beta new"},
+        ],
+        "two-file update",
+    )
+
+    assert result.startswith("Proposed: ")
+    files = list(outbox.glob("*.patch.md"))
+    assert len(files) == 1
+    body = files[0].read_text()
+    assert body.count("diff --git") == 2
+    assert "a.md" in body and "b.md" in body
+    assert "+alpha new" in body
+    assert "+beta new" in body
+
+
+def test_propose_edit_multi_file_fails_atomically_no_partial_write(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "a.md").write_text("alpha old\n")
+    (vault / "b.md").write_text("beta old\n")
+
+    result = server.propose_edit(
+        [
+            {"path": "a.md", "old": "alpha old", "new": "alpha new"},
+            {"path": "b.md", "old": "missing anchor", "new": "beta new"},
+        ],
+        "r",
+    )
+
+    assert "Edit 1 for b.md failed" in result
+    assert list(outbox.glob("*.patch.md")) == []
+
+
+def test_propose_edit_multi_file_skips_unchanged_files(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "a.md").write_text("same\n")
+    (vault / "b.md").write_text("beta old\n")
+
+    result = server.propose_edit(
+        [
+            {"path": "a.md", "old": "same", "new": "same"},
+            {"path": "b.md", "old": "beta old", "new": "beta new"},
+        ],
+        "r",
+    )
+
+    assert result.startswith("Proposed: ")
+    body = next(outbox.glob("*.patch.md")).read_text()
+    assert body.count("diff --git") == 1
+    assert "b.md" in body
+    assert "a.md" not in body

@@ -5,26 +5,29 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.8 (Draft) |
+| Document version | 1.9 (Draft) |
 | System / API version documented | 1.2.0 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
 | Classification | Public (repository is open-source; see §6 for redaction policy) |
-| Related artifacts | [`agents.md`](agents.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md) |
+| Related artifacts | [`agents.md`](agents.md), [`RISKS.md`](RISKS.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md), [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) |
 
 ### Revision History
 
-| Version | Date | Author | Summary of changes |
-|---|---|---|---|
-| 1.0 | 2026-08-23 | Claude Code | Initial issue. Covers the Phase 1a service (`get_overview`, `search`, `read_note`, `note`) plus `propose_edit` (including F8 multi-file atomic proposals), authentication, and common cross-tool requirements. |
-| 1.1 | 2026-08-23 | Claude Code | Coverage audit: added §9.9 (Indexing & Chunking, `IDX`) to give the previously-untraced `_iter_chunks`/`build_index` behavior its own requirement IDs; reworked §16 RTM into an index pointing at inline `# BRD:` traceability comments now present in every `tests/test_*.py` test function; added OI-7..OI-10 for coverage gaps found during the audit (counters never asserted, the primary vault-symlink branch never exercised, `get_overview`'s exact heading/separator format never asserted, wholesale-reindex-clears-stale-rows never proven). No requirement's *content* changed — this revision only adds requirements and corrects traceability claims. |
-| 1.2 | 2026-08-23 | Claude Code | Resolved the `search` result-count discrepancy (RISK-1/OI-1): `server.py`'s docstring and `README.md` now say 10, matching the actual `LIMIT` and `FR-SRCH-2` — no runtime behavior changed. Added `NFR-PROP-10`, the Prometheus-counter requirement for `propose_edit` that was missing despite the counter existing in code since v1.1; updated §13's source reference accordingly. Added §9.10 Vault Path Blacklist (`BLK`, FR-BLK-1..5, NFR-BLK-1..3), a **not-yet-implemented** operator-requested capability to exclude configured vault subdirectories from `search` and `read_note`; flagged its interaction with `propose_edit` (deliberately out of scope) as OI-11 rather than resolving it unilaterally. |
-| 1.3 | 2026-08-23 | Claude Code | Resolved OI-11 per operator follow-up: `propose_edit` now SHALL honor `VAULT_BLACKLIST` too (FR-BLK-5 rewritten from "explicitly out of scope" to a requirement). Directed enforcement into the `_resolve_in_vault` helper shared by `read_note` and `propose_edit` (NFR-BLK-3 rewritten) rather than adding a second, independent check — same behavior, one implementation instead of two that could drift apart. |
-| 1.4 | 2026-08-23 | Claude Code | Resolved every remaining open issue (OI-2 through OI-10): added `read_note`'s `READ_MAX_CHARS` truncation cap (FR-READ-4, NFR-READ-2 rewritten from a "gap" callout to a positive requirement); added a non-blocking `flock` lock to `scripts/apply_proposals.py` guarding the whole run (RISK-7 resolved); added `tests/test_auth.py` covering `BearerAuthMiddleware` end-to-end against a real RSA-signed JWT (RISK-8 resolved) plus a smoke test pinning the `/mcp` mount path; added a `note` test section (FR-NOTE-1..5); added delta-based Prometheus counter tests for every tool; added tests for the previously-unexercised primary `VAULT_PATH/vault` branch (`read_note` and `build_index` each have their own copy of that fallback); added an exact-format `get_overview` test; added a test proving `build_index`'s wholesale rebuild actually clears a prior run's rows. §16 RTM rewritten again to reflect the new coverage state. 69 tests now pass, up from 39 in v1.0. |
-| 1.5 | 2026-08-23 | Claude Code | PR review feedback (before merge): v1.4's `read_note` truncation cap (FR-READ-4) had no way to fetch the remainder of a note beyond `READ_MAX_CHARS` — a genuine gap, not just a documentation one. Added `FR-READ-5`: `read_note` now accepts an optional character `offset` parameter, and a truncated response's marker states the offset to pass to continue reading. `FR-READ-4` reworded to stop claiming "no pagination is offered." Regression-tested: `test_read_note_pagination_continues_from_offset`, `test_read_note_offset_beyond_length_returns_empty`, `test_read_note_negative_offset_clamped_to_zero`. 72 tests now pass. |
-| 1.6 | 2026-08-23 | Claude Code | Fresh gap audit (not just a re-check of prior findings): assigned OI-12 retroactively to the v1.5 pagination fix for a complete audit trail; found and resolved four new discrepancies — `agents.md`'s tool list was stale after v1.5 (OI-13), `httpx` was an undeclared-but-safe transitive test dependency (OI-14), and two RTM entries (`NFR-COM-1`, `NFR-AUTH-2`) were wrongly classified as "not unit-testable" when both were straightforward to test and now are (OI-15, OI-16). Documented the CI Trivy vulnerability scan as `NFR-SEC-6` — a real, enforced control that predated this document but was never itself specified. Formalized two previously-informal gaps as OI-17 (`push-sync.sh` has zero test coverage) and OI-18 (`FR-SRCH-2`/`FR-SRCH-3` exact shape untested), and one low-priority one as OI-19. Added §17.1 Prioritized Backlog ranking everything still open. 74 tests now pass (2 new: `test_exactly_five_tools_registered`, `test_jwks_client_is_cached_across_calls`). |
-| 1.7 | 2026-08-23 | Claude Code | Implemented §9.10 Vault Path Blacklist — `FR-BLK-1..5`/`NFR-BLK-1..3` all move from "Not implemented — proposed" to "Implemented." `VAULT_BLACKLIST` filtering lives in `_resolve_in_vault` itself (NFR-BLK-3, exactly as specified), so `read_note` and `propose_edit` both inherit it with zero tool-specific code (FR-BLK-5 falls out for free); `build_index` gained the matching indexer-side exclusion (FR-BLK-2), additive to the existing `Chat Archive` exclusion. System/API version bumped to 1.2.0 (§11.3: additive, backward-compatible — unset `VAULT_BLACKLIST` is exactly prior behavior per NFR-BLK-2, confirmed by the full pre-existing suite passing unchanged). §17.1 backlog re-ranked now that its former #1 item is done. 79 tests now pass (5 new). |
-| 1.8 | 2026-08-23 | Claude Code | Final gap audit for the day (per operator request, pushed to the same `feature/vault-blacklist` branch rather than a new one): found and fixed two real gaps in the blacklist feature just built. `RISK-9`/`OI-20` — a leading-slash typo in a `VAULT_BLACKLIST` entry silently matched nothing instead of blacklisting the intended directory; elevated to the risk register given the failure mode is silent and the feature exists specifically to hide sensitive content. Fixed in `_parse_blacklist` (extracted from an inline expression specifically so it's directly unit-testable). Also closed a same-category-as-`OI-8` gap: no test exercised blacklist enforcement under the primary `VAULT_PATH/vault` branch, only the fallback. Added `agents.md` and `next-steps.md` entries for the new feature, both previously missing entirely — `next-steps.md`'s flags real-world validation as not yet done, consistent with the operator's stated plan to test today's changes live before continuing. 82 tests now pass (3 new). |
+| Version | Date | Summary |
+|---|---|---|
+| 1.0 | 2026-08-23 | Initial issue: Phase 1a tools, `propose_edit`, auth, common requirements. |
+| 1.1 | 2026-08-23 | Added §9.9 (IDX). Reworked RTM to point at inline test comments. |
+| 1.2 | 2026-08-23 | Resolved RISK-1/OI-1 (search count discrepancy). Proposed §9.10 (BLK), not yet implemented. |
+| 1.3 | 2026-08-23 | Resolved OI-11 — `propose_edit` honors the blacklist too. |
+| 1.4 | 2026-08-23 | Resolved OI-2..OI-10 (read_note cap, apply lock, auth tests, etc). |
+| 1.5 | 2026-08-23 | Added FR-READ-5 (`read_note` pagination), per PR review. |
+| 1.6 | 2026-08-23 | Gap audit: OI-12..OI-19, NFR-SEC-6. |
+| 1.7 | 2026-08-23 | Implemented §9.10 (BLK). System version → 1.2.0. |
+| 1.8 | 2026-08-23 | Fixed RISK-9/OI-20 (blacklist leading-slash bug + branch coverage). |
+| 1.9 | 2026-08-23 | Restructure: extracted risk register to `RISKS.md` (was §14); folded RTM (was §16) into a §9.1 traceability requirement; moved Open Issues (was §17) to GitHub Issues. Added the hard rule this revision itself follows — this document states requirements, not a session-by-session log. Full detail for every prior revision lives in git history and PR descriptions, not here. |
+
+Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 
 ### Approval
 
@@ -83,14 +86,14 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 
 | Item | Why |
 |---|---|
-| Semantic / embedding-based search (ONNX, sqlite-vec, RRF hybrid) | Deferred to Phase 1b; triggered only if the FTS5 miss-rate metric crosses threshold (§9.4, §15) |
+| Semantic / embedding-based search (ONNX, sqlite-vec, RRF hybrid) | Deferred to Phase 1b; triggered only if the FTS5 miss-rate metric crosses threshold (§9.4, §14) |
 | Vector database (Qdrant), reranking (Ollama) | Phase 2a/2b; triggered by scale or quality thresholds not yet met |
-| Multi-user / multi-tenant access control | Current deployment model is single-operator; see RISK-6 |
+| Multi-user / multi-tenant access control | Current deployment model is single-operator; see `RISKS.md` RISK-6 |
 | Non-Obsidian vault formats | Vault is assumed to be a Markdown tree with Obsidian conventions (wikilinks, `_map.md`, `context.md`) |
 | Non-Dex identity providers | Auth is delegated wholesale to one self-hosted Dex instance |
 | Deleting or moving existing notes via any tool | No tool in this service can delete or rename vault content; `propose_edit` can only transform existing text in place |
 | Direct vault mutation by the MCP server process | All mutation is mediated by outbox + sidecar (`note`) or outbox + human-run script (`propose_edit`) |
-| Real-time collaboration / concurrent-editor conflict resolution beyond `git apply --3way`'s own drift detection | Out of scope; see RISK-7 |
+| Real-time collaboration / concurrent-editor conflict resolution beyond `git apply --3way`'s own drift detection | Out of scope; see `RISKS.md` RISK-7 |
 
 ## 5. Stakeholders & Roles
 
@@ -110,7 +113,7 @@ In this project the first three rows are the same individual; the roles are kept
 - **A2.** The operator has one shared Claude subscription (Pro-tier or similar) covering Claude Code, Claude.ai chat, and Cowork; no `ANTHROPIC_API_KEY` is used, so there is no separate API-billed usage pool. This directly informs NFR-PROP-5 and the retracted "quota savings" rationale recorded in `next-steps.md`.
 - **A3.** The deployment target is a small self-hosted Kubernetes cluster (or Docker Compose for local dev), not a managed cloud platform.
 - **A4.** Cloudflare (or an equivalent edge proxy) sits in front of the public Dex hostname and blocks in-cluster requests to it, which is why `DEX_JWKS_URI` must point at an in-cluster address rather than relying on OIDC discovery (NFR-AUTH-3).
-- **A5.** There is exactly one authenticated principal in practice; the system does not need per-note authorization (see NFR-AUTH-7, RISK-6).
+- **A5.** There is exactly one authenticated principal in practice; the system does not need per-note authorization (see NFR-AUTH-7, `RISKS.md` RISK-6).
 - **C1 (constraint).** `readOnlyRootFilesystem: true` is set on the server's Kubernetes pod; the server process may write only to `DB_PATH`, `OUTBOX_PATH`, and `/tmp`.
 - **C2 (constraint).** The server container image must not contain a `git` binary or shell out to one (NFR-COM-3, NFR-PROP-1) — this keeps the blast radius of a server-process compromise to "read the vault mirror, write to an outbox," not "push to the vault's git history."
 - **C3 (constraint).** Claude's mobile app UI cannot accept a manually-entered static bearer token, so OAuth 2.1 with PKCE is mandatory, not merely preferred (NFR-AUTH-4).
@@ -168,6 +171,10 @@ Component responsibilities are strictly separated by design (this separation is 
 ### 9.1 Numbering Convention
 
 Each requirement has a stable ID of the form `FR-<AREA>-<n>` or `NFR-<AREA>-<n>`. `propose_edit` requirements additionally carry their original ID from the source vault design note (`F1`–`F8`, `N1`–`N9`) in parentheses for traceability, since that note predates this document and is referenced from `next-steps.md`. Priority uses MoSCoW (Must / Should / Could). Status reflects the state of this codebase as of the system version in Document Control, not aspiration.
+
+**Traceability requirement.** Every requirement in this section SHALL be traceable to either an inline `# BRD: <ID>[, <ID>...]` comment directly above a `test_*` function in `tests/test_server.py`/`tests/test_apply_proposals.py`/`tests/test_auth.py`, or an explicit note in this document for why it is not independently unit-testable (e.g. an architectural or deployment fact). Run `grep -rn "# BRD:" tests/test_*.py` for the current, authoritative mapping — this is deliberately not duplicated as a table in this document (a hand-maintained copy tried in document v1.0–v1.8 drifted from the actual suite the moment either changed, silently, and added nothing a live `grep` doesn't already answer). A requirement found untraceable and not yet excused becomes a [GitHub Issue](https://github.com/ftdube/secondbrain-mcp/issues), not a row in a BRD table.
+
+As of document v1.9, the following are excused from that requirement as inherent architectural, deployment, or process facts rather than unit-testable behavior — asserting "runs on Kubernetes" or "delegates identity to Dex" isn't something a unit test proves: `NFR-COM-2`, `NFR-COM-3`, `NFR-COM-5`, `NFR-OVW-1`, `NFR-OVW-3`, `NFR-SRCH-3`, `NFR-READ-2`, `NFR-READ-3`, `NFR-NOTE-1`, `NFR-NOTE-3`, `NFR-PROP-1`, `NFR-PROP-4`, `NFR-PROP-5`, `NFR-PROP-6`, `NFR-PROP-7`, `NFR-AUTH-1`, `NFR-AUTH-3`, `NFR-AUTH-4`, `NFR-AUTH-7`, `NFR-BLK-1`, `NFR-BLK-2`, `NFR-BLK-3`. This list exists so a future audit doesn't spend time re-deriving which NFRs fall in this bucket, or re-flagging one as a gap (two prior audits, in document v1.1 and v1.6, each spent real effort re-examining this exact question) — remove an ID from it only when it becomes independently testable, not on a recurring review cadence.
 
 ### 9.2 Common / Cross-Tool Requirements (`COM`)
 
@@ -327,7 +334,7 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | NFR-AUTH-4 | Only OAuth 2.1 with PKCE SHALL be supported for the Claude.ai client; static long-lived bearer tokens are out of scope (C3). | Must | Implemented |
 | NFR-AUTH-5 | Any path not explicitly in `AUTH_PUBLIC` SHALL default to requiring authentication (allowlist, not denylist). | Must | Implemented |
 | NFR-AUTH-6 | Authentication failures SHALL be logged with enough context to debug (path, truncated Authorization-header prefix) but SHALL NOT log full tokens. | Must | Implemented |
-| NFR-AUTH-7 | **Gap:** the system implements authentication (who you are) but no per-note or per-tool authorization (what you may touch); any principal with a valid `MCP_CLIENT_ID`-audienced token has full read/propose access to the entire vault. Acceptable under the current single-user model (A5). | Should (for current scale) | Not implemented — see RISK-6 |
+| NFR-AUTH-7 | **Gap:** the system implements authentication (who you are) but no per-note or per-tool authorization (what you may touch); any principal with a valid `MCP_CLIENT_ID`-audienced token has full read/propose access to the entire vault. Acceptable under the current single-user model (A5). | Should (for current scale) | Not implemented — see `RISKS.md` RISK-6 |
 
 ### 9.9 Indexing & Chunking (`IDX`)
 
@@ -382,7 +389,7 @@ Added as a requirements-only proposal in document v1.2; **implemented in documen
 |---|---|---|---|
 | `/health` | GET | None | Liveness/readiness probe target |
 | `/metrics` | GET | None | Prometheus scrape target (text exposition format) |
-| `/reindex` | POST | None (by design — see RISK-3) | Force a synchronous FTS5 rebuild |
+| `/reindex` | POST | None (by design — see `RISKS.md` RISK-3) | Force a synchronous FTS5 rebuild |
 | `/.well-known/oauth-protected-resource` | GET | None | OAuth 2.0 Protected Resource Metadata (RFC 9728), enabling client-side OAuth discovery |
 | `/mcp` *(exact path is fastmcp-version-dependent — see OI-5)* | POST (+ SSE) | Bearer JWT | The MCP JSON-RPC 2.0 endpoint; multiplexes `initialize`, `tools/list`, `tools/call`, etc. |
 
@@ -431,86 +438,19 @@ This section consolidates and cross-references §9.2 and §9.8; only requirement
 
 All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheus scraping; no dashboards or alerting rules are defined by this document beyond the Phase 1b trigger already specified in `next-steps.md` (NFR-SRCH-3).
 
-## 14. Risk Register
-
-| ID | Risk | Likelihood | Impact | Mitigation / Status |
-|---|---|---|---|---|
-| RISK-1 | *(Resolved in document v1.2)* `search`'s own docstring/README claimed "top 5" results while the implemented `LIMIT` was 10. | — | — | **Resolved** — docstring (`server.py`) and `README.md` now say 10, matching `FR-SRCH-2` and the actual `LIMIT`. No runtime behavior changed. |
-| RISK-2 | *(Resolved in document v1.4)* `read_note` had no size cap; one very large note could consume a disproportionate share of a session's token budget. | — | — | **Resolved** — `read_note` now caps responses at `READ_MAX_CHARS` (20,000 chars) with an explicit truncation marker (FR-READ-4, NFR-READ-2). |
-| RISK-3 | `/reindex` is intentionally unauthenticated; if `MCP_BASE_URL` were ever exposed without the existing OAuth-fronted ingress, any anonymous caller could trigger repeated reindex load. | Low | Low (rebuild cost only, no data exposure) | Keep `/reindex` behind the existing ingress; do not expose it as a separate public route |
-| RISK-4 | JWKS keys are cached in-process; a Dex signing-key rotation without a coordinated pod restart causes a window of `401`s for every client. | Low (infrequent rotation) | Medium (full-service outage until restart) | Documented operational runbook step in `agents.md` |
-| RISK-5 | Multi-file proposal atomicity (FR-PROP-8) depends entirely on `apply_proposals.py`'s check-before-apply discipline, not on `git` itself. A future edit calling `apply_one()` without a preceding `check()` would silently reintroduce partial-apply risk. | Low | High (could corrupt vault notes) | NFR-PROP-8 + regression test `test_multi_file_patch_atomic_when_one_file_drifted`; documented as a hard invariant in `agents.md` |
-| RISK-6 | No per-note authorization exists; any authenticated principal can read or propose edits to the entire vault. | N/A under current single-user model | High if the deployment model ever becomes multi-user | Explicitly out of scope (§4.2); revisit if multi-user support is ever pursued |
-| RISK-7 | *(Resolved in document v1.4)* Concurrent `apply-proposals` runs were not guarded; two overlapping invocations (e.g. a cron job and a manual run) could interleave `check()`/`apply()` steps across processes. | — | — | **Resolved** — `scripts/apply_proposals.py` now takes an exclusive, non-blocking `flock` on `<repo>/.apply_proposals.lock` for the whole run; a second concurrent invocation exits immediately (code 3) without touching any patch or note (OI-3). |
-| RISK-8 | *(Resolved in document v1.4)* The authentication middleware (`BearerAuthMiddleware`, JWT validation, public-path allowlist) had no automated test coverage. | — | — | **Resolved** — `tests/test_auth.py` now covers FR-AUTH-1..6 and NFR-AUTH-5/6 against the real `BearerAuthMiddleware` class, using a generated RSA keypair and a mocked `PyJWKClient` (OI-4). |
-| RISK-9 | *(Resolved in document v1.8, same-day as introduction)* `VAULT_BLACKLIST`'s initial implementation (v1.7) parsed entries with a raw `Path(p).parts`; a leading-slash entry (e.g. `/Health/Psychology` instead of `Health/Psychology`) produced `("/", "Health", "Psychology")`, which never matches a real relative path — a plausible operator typo would silently blacklist nothing. Elevated to a risk-register entry (not just a bug note) because the failure mode is silent and the feature's whole purpose is hiding sensitive content — a false sense of "this is hidden" is worse than an error. | Low (caught same-day, pre-merge) | Would have been High had it shipped (silent exposure of content the operator believed was excluded) | **Resolved** — `_parse_blacklist` strips leading slashes before matching; regression-tested (`test_parse_blacklist_strips_leading_slashes`). |
-
-## 15. Success Metrics / KPIs & Acceptance Criteria
+## 14. Success Metrics / KPIs & Acceptance Criteria
 
 - **Token budget:** tool-schema overhead SHALL stay ≤ ~3.5k tokens/session (five tools), against a generic-filesystem-MCP baseline of ~10k tokens (G3).
 - **Search quality gate:** rolling 7-day `mcp_search_misses_total / mcp_searches_total` SHALL stay ≤ 20%; crossing this threshold is the sole documented trigger for starting Phase 1b work (out of scope for this revision).
-- **Acceptance criteria for v1.1.0:** every FR/NFR row in §9.7 (`propose_edit`) and the multi-file addition in particular (FR-PROP-8, NFR-PROP-8, NFR-PROP-9) has a passing automated regression test (see §16); `ruff` reports no new lint findings versus the pre-`propose_edit` baseline; the model-free-apply gate (NFR-PROP-5) is codified in `agents.md`, not merely in this document.
+- **Acceptance criteria for v1.1.0:** every FR/NFR row in §9.7 (`propose_edit`) and the multi-file addition in particular (FR-PROP-8, NFR-PROP-8, NFR-PROP-9) has a passing automated regression test (§9.1's traceability requirement); `ruff` reports no new lint findings versus the pre-`propose_edit` baseline; the model-free-apply gate (NFR-PROP-5) is codified in `agents.md`, not merely in this document.
 
-## 16. Requirements Traceability Matrix (RTM)
-
-**As of document v1.1, the fine-grained mapping lives inline in the test files themselves**, as a `# BRD: <ID>[, <ID>...]` comment directly above every `test_*` function in `tests/test_server.py` and `tests/test_apply_proposals.py` — run `grep -n "# BRD:" tests/test_*.py` for the authoritative, line-numbered list. Duplicating that mapping into this table as well was tried in document v1.0 and rejected on the second pass: a hand-maintained copy of test-to-requirement mappings drifts from the actual test suite the moment either changes, silently. This table is instead a coverage *summary*, checked against the inline comments as of this revision.
-
-| Area | IDs with automated coverage | IDs with **no** automated coverage |
-|---|---|---|
-| `COM` | FR-COM-1, FR-COM-3, FR-COM-4 (both branches, as of v1.4), NFR-COM-1 (as of v1.6), NFR-COM-4 (as of v1.4) | FR-COM-2 (no test isolates "never raises, always returns str" as its own assertion — implicitly true wherever the full suite passes); NFR-COM-2, NFR-COM-3, NFR-COM-5 (process/deployment properties, not unit-testable in isolation) |
-| `IDX` | FR-IDX-1, FR-IDX-2, FR-IDX-3, FR-IDX-4, FR-IDX-5 (as of v1.4) | *(none)* |
-| `OVW` | FR-OVW-1, FR-OVW-2 (exact format, as of v1.4), FR-OVW-3, FR-OVW-4, NFR-OVW-2 (as of v1.4) | NFR-OVW-1, NFR-OVW-3 (calling-convention/freshness properties, not unit-testable in isolation) |
-| `SRCH` | FR-SRCH-1, FR-SRCH-4, FR-SRCH-5, NFR-SRCH-2 (as of v1.4) | FR-SRCH-2 (exact 10-row limit), FR-SRCH-3 (exact snippet shape) — no test indexes >10 matching notes to exercise the cap; NFR-SRCH-3 (a product-policy statement, not something a unit test asserts) |
-| `READ` | FR-READ-1, FR-READ-2, FR-READ-3, FR-READ-4 (as of v1.4), FR-READ-5 (as of v1.5), NFR-READ-1 (as of v1.4) | NFR-READ-2, NFR-READ-3 (rationale/freshness statements, not independently testable beyond FR-READ-4/5's own tests) |
-| `NOTE` | FR-NOTE-1..5, NFR-NOTE-2, NFR-NOTE-4 (all as of v1.4) | NFR-NOTE-1 (async push-sync handoff timing — would need a push-sync test double), NFR-NOTE-3 (K8s manifest responsibility, not unit-testable) |
-| `PROP` | FR-PROP-1, FR-PROP-2, FR-PROP-3, FR-PROP-4, FR-PROP-6, FR-PROP-7, FR-PROP-8, NFR-PROP-2, NFR-PROP-3, NFR-PROP-8, NFR-PROP-9, NFR-PROP-10 (as of v1.4) | NFR-PROP-1, NFR-PROP-4, NFR-PROP-5, NFR-PROP-6, NFR-PROP-7 (process/architecture properties, not unit-testable in isolation) |
-| `AUTH` | FR-AUTH-1..6, NFR-AUTH-5, NFR-AUTH-6 (all as of v1.4), NFR-AUTH-2 (as of v1.6) (all in `tests/test_auth.py`) | NFR-AUTH-1, NFR-AUTH-3, NFR-AUTH-4, NFR-AUTH-7 (deployment/protocol/architecture facts, not unit-testable against this codebase alone) |
-| `BLK` | FR-BLK-1, FR-BLK-2, FR-BLK-3, FR-BLK-4, FR-BLK-5 (all as of v1.7; FR-BLK-1's leading-slash normalization and FR-BLK-3 under the primary `VAULT_PATH/vault` branch both added as of v1.8) | NFR-BLK-1, NFR-BLK-2, NFR-BLK-3 (architectural/config-timing properties, demonstrated by construction and by the unchanged pre-existing suite rather than by a dedicated test) |
-
-RISK-5's mitigation cites `test_multi_file_patch_atomic_when_one_file_drifted` by name; that reference and the ones in `agents.md`/`next-steps.md` remain accurate as of this revision (verified while writing it, not just carried forward). The `OI-3` fix added `test_main_rejects_concurrent_run_without_touching_anything`, which now grounds RISK-7's resolution the same way.
-
-## 17. Open Issues & Recommendations
-
-| ID | Issue | Recommendation |
-|---|---|---|
-| OI-1 | *(Resolved in document v1.2)* `search`'s docstring and `README.md` said "top 5"; code returns up to 10. | **Resolved** — updated the docstring and `README.md` to say 10 (kept the existing `LIMIT`, since the token-budget-vs-recall tradeoff of changing it is a separate product decision, not a documentation fix). |
-| OI-2 | *(Resolved in document v1.4)* `read_note` had no size cap (NFR-READ-2, RISK-2). | **Resolved** — added `READ_MAX_CHARS = 20_000` and an explicit `"...(truncated, N bytes total)"` marker (FR-READ-4). Regression-tested: `test_read_note_truncates_large_files`, `test_read_note_under_cap_not_truncated`. |
-| OI-3 | *(Resolved in document v1.4)* `apply_proposals.py` had no concurrency guard (RISK-7). | **Resolved** — added a non-blocking `flock`-based lock (`_lock()`) covering the whole run; a second concurrent invocation exits with code 3 and touches nothing. Regression-tested: `test_main_rejects_concurrent_run_without_touching_anything`. |
-| OI-4 | *(Resolved in document v1.4)* `BearerAuthMiddleware` / JWT validation had zero automated test coverage (RISK-8). | **Resolved** — `tests/test_auth.py` exercises the real middleware class against a minimal test app (not the full `server.app`, to avoid dragging in the FTS5/vault-watcher lifespan): missing/malformed header, wrong signature, wrong audience, wrong issuer, expired token, the public-path allowlist (including `AUTH_PUBLIC_EXTRA`-style extension), and the truncated-header log line. |
-| OI-5 | *(Resolved in document v1.4)* The exact MCP transport mount path (referred to in §11.1 as `/mcp`) was not pinned by any test. | **Resolved** — `test_mcp_asgi_mounted_at_expected_path` asserts `/mcp` is among `server.mcp_asgi.routes`; confirmed against the actually-installed `fastmcp` 3.4.7 before writing the assertion, not guessed. |
-| OI-6 | *(Resolved in document v1.4)* `note` had no dedicated automated test. | **Resolved** — added a `note` test section covering FR-NOTE-1..5: outbox write + content shape, filename sanitization, the empty-after-sanitization → `untitled` case, the 80-char truncation, and the collision → timestamp-suffix behavior. |
-| OI-7 | *(Resolved in document v1.4)* No automated test asserted a Prometheus counter increment. | **Resolved** — added delta-based tests (`Counter._value.get()` before/after) for every counter: `mcp_overviews_total`, `mcp_searches_total` (+ the miss counter), `mcp_reads_total`, `mcp_notes_total`, `mcp_propose_edits_total`, and their `_chars_total` companions where applicable. |
-| OI-8 | *(Resolved in document v1.4)* No test exercised the primary `VAULT_PATH/vault` branch (the git-sync symlink target) of the effective-vault-root resolution. | **Resolved** — added `test_read_note_prefers_nested_vault_dir` and `test_build_index_prefers_nested_vault_dir`, each creating a nested `VAULT_PATH/vault/` and confirming *that* path — not the outer one — is what gets read from. |
-| OI-9 | *(Resolved in document v1.4)* `get_overview`'s exact `## <filename>` heading and `\n\n---\n\n` separator formatting (FR-OVW-2) was not asserted by any test. | **Resolved** — added `test_get_overview_exact_format`, asserting the full string exactly rather than substring containment; the original weaker test is kept alongside it as a readable smoke test. |
-| OI-10 | *(Resolved in document v1.4)* FR-IDX-5 (wholesale, non-incremental reindex) had no test proving a *second* `build_index` call actually clears rows from a prior run. | **Resolved** — added `test_build_index_second_call_clears_stale_rows`: indexes vault A, then vault B into the same DB, and asserts vault A's row is gone, not just uncounted. |
-| OI-11 | *(Resolved in document v1.3)* An earlier draft of §9.10 deliberately excluded `propose_edit` from `VAULT_BLACKLIST` enforcement, which would have let a note be simultaneously hidden from `read_note`/`search` yet still editable via `propose_edit`. | **Resolved** — operator confirmed `propose_edit` should also honor the blacklist. FR-BLK-5 now requires it, enforced via the same shared `_resolve_in_vault` helper `read_note` already uses (NFR-BLK-3), so both tools inherit one implementation instead of two that could drift apart. |
-| OI-12 | *(Resolved in document v1.5)* v1.4's `read_note` truncation (FR-READ-4) had no way to fetch the remainder of a note beyond `READ_MAX_CHARS` — caught by PR review, not by the audit process that produced OI-2 in the first place. | **Resolved** — added `FR-READ-5` (optional character `offset` parameter); reworded `FR-READ-4` to stop claiming "no pagination is offered." Assigned an ID retroactively here for a complete audit trail — see the v1.5 revision history entry for the original context. |
-| OI-13 | *(Resolved in document v1.6)* `agents.md`'s tool list still said `read_note(path)` after v1.5 added the `offset` parameter — a real discrepancy in the same category as OI-1, found during this audit. | **Resolved** — updated to `read_note(path, offset=0)`. |
-| OI-14 | *(Resolved in document v1.6)* `tests/test_auth.py` imports `starlette.testclient.TestClient`, which requires `httpx` — not declared in `requirements.txt` or `requirements-dev.txt`. In practice `httpx` is guaranteed transitively (`fastmcp` → `mcp`, a hard, non-optional dependency, confirmed by inspection), so this was never actually broken, but relying on an undeclared transitive dependency for a directly-imported symbol is fragile dependency hygiene. | **Resolved** — added `httpx>=0.27.0` to `requirements-dev.txt` explicitly. |
-| OI-15 | *(Resolved in document v1.6)* The RTM classified `NFR-COM-1` (the 5-tool cap) as "not unit-testable in isolation." It demonstrably is: `await server.mcp.list_tools()` returns exactly the 5 registered tools. This is arguably the single most load-bearing invariant in the whole project (§2's entire rationale for existing over the generic filesystem MCP server) and had zero automated enforcement. | **Resolved** — added `test_exactly_five_tools_registered`. |
-| OI-16 | *(Resolved in document v1.6)* The RTM classified `NFR-AUTH-2` (JWKS caching) as "not unit-testable." The caching mechanism itself (`_get_jwks()` returning the same object across calls) demonstrably is testable, even though the "requires a pod restart after key rotation" consequence remains an operational fact, not a unit-test assertion. | **Resolved** — added `test_jwks_client_is_cached_across_calls`. |
-| OI-17 | `sidecars/push-sync.sh` — the shell script that routes outbox files to `Inbox/` vs `Proposals/` and commits/pushes them (part of `FR-PROP-4`'s and `FR-NOTE-4`'s contract) — has zero automated test coverage. A regression here (e.g. the `*.patch.md` case pattern silently stops matching) would be silent: notes or proposals would land in the wrong place with no test catching it. | Add a subprocess-based test harness (e.g. drive the script against a scratch local git remote and a fake outbox) or a `bats`-style shell test suite; requires picking a shell-testing approach this repo doesn't have precedent for yet. See §17.1 for priority. |
-| OI-18 | `FR-SRCH-2` (the 10-row cap) and `FR-SRCH-3` (exact snippet shape: path + heading + ~30-token ellipsized body) are stated as requirements but no test indexes more than 10 matching notes to exercise the cap, nor asserts the precise three-part shape of a result row — only that a known path substring appears somewhere in the joined output. This was already visible in the §16 RTM's prose but never had its own tracked ID or recommendation until this audit. | Add a test indexing 15+ notes matching one query term, asserting exactly 10 rows returned; add a test asserting the `**{path}** — {heading}\n{snippet}` shape precisely (not just substring containment) on a single-result case. |
-| OI-19 | `NFR-PROP-9`'s specific claim — that the diff's `index` line is always the dummy `0000000..0000000`, never a real hash — is only proven indirectly, via the behavioral drift-regression test (`test_drifted_apply_never_writes_conflict_markers`). No test asserts the literal string in `_make_diff`'s output directly. | Low priority: the existing behavioral test is arguably *stronger* evidence than a string match would be (it proves the consequence, not just the mechanism). Add `assert "index 0000000..0000000 100644" in server._make_diff(...)` only if a future change to `_make_diff` needs a faster, more localized failure signal than the drift test provides. |
-| OI-20 | *(Resolved in document v1.8)* `VAULT_BLACKLIST` (RISK-9) had a leading-slash parsing bug, and no test exercised blacklist enforcement under the primary `VAULT_PATH/vault` branch — the same test-coverage category as OI-8, reintroduced by not checking for it while building a brand-new feature that touches the same code path. | **Resolved** — fixed the parsing bug (see RISK-9); added `test_read_note_blacklisted_path_denied_under_nested_vault_dir`. General lesson, not just this feature's: any new code touching `_effective_vault`/`_resolve_in_vault` needs a nested-`vault/`-dir test from the start, not as a follow-up audit finding. |
-
-### 17.1 Prioritized Backlog (document v1.7)
-
-Priority 1 from document v1.6 — building §9.10's Vault Path Blacklist — is now done (`FR-BLK-1..5`, `NFR-BLK-1..3` all Implemented; 79 tests pass, 5 new). What's left, ranked:
-
-| Priority | Item | Why this rank | Rough effort |
-|---|---|---|---|
-| **1 — Medium** | OI-17 — `push-sync.sh` test coverage | Real silent-failure risk in a component that decides whether a note or proposal actually reaches the vault correctly; currently zero coverage. Now the top-ranked item, since the blacklist build (previously #1) is done and nothing else outranks it. | Medium-High: needs a shell-testing approach this repo doesn't have precedent for (subprocess harness against a scratch git remote, or adopt `bats`). |
-| **2 — Medium** | OI-18 — `FR-SRCH-2`/`FR-SRCH-3` exact-shape tests | Locks in the already-fixed 5-vs-10 discrepancy (RISK-1) against silent regression; pure Python, no new test infrastructure needed. | Low: two focused tests in `tests/test_server.py`. |
-| **3 — Low** | OI-19 — direct `_make_diff` index-line assertion | Marginal value over the existing behavioral test; only worth doing opportunistically alongside other `propose_edit` work. | Trivial. |
-| — (no action) | Remaining "not unit-testable in isolation" NFRs (`NFR-COM-2/3/5`, `NFR-OVW-1/3`, `NFR-SRCH-3`, `NFR-READ-2/3`, `NFR-NOTE-1/3`, `NFR-PROP-1/4/5/6/7`, `NFR-AUTH-1/3/4/7`, `NFR-BLK-1/2/3`) | Genuine architectural/deployment/config-timing facts, not gaps — asserting "runs on Kubernetes" or "delegates identity to Dex" isn't something a unit test proves. Listed here only so a future audit doesn't re-flag them as findings. | N/A |
-| — (no action) | `RISK-3`, `RISK-4`, `RISK-6`, `NFR-AUTH-7` | Already accepted risks with documented rationale (single-operator deployment model, `/reindex` behind the existing ingress, JWKS-rotation runbook step) — revisit only if the deployment model itself changes (e.g. multi-user), not as part of routine hardening. | N/A |
-
-## 18. Appendices
+## 15. Appendices
 
 ### Appendix A — Related Documents
 
 - [`agents.md`](agents.md) — hard rules and non-obvious operational gotchas (token-budget-constrained, kept minimal by design; this document is the expanded, unconstrained counterpart)
+- [`RISKS.md`](RISKS.md) — risk register (extracted from this document's former §14 in v1.9)
+- [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) — open gaps and the prioritized backlog (moved out of this document's former §17 in v1.9); resolved gaps are closed issues linked to the PR that fixed them, not deleted
 - [`README.md`](README.md) — user-facing setup and architecture summary
 - [`next-steps.md`](next-steps.md) — phase roadmap, trigger conditions, and the `propose_edit` implementation history (including both correctness fixes referenced in NFR-PROP-8/9)
 - The original `propose_edit` design note (vault `Inbox/propose_edit-pipeline---concept-requirements-validation.md`) — the source of the F1–F8/N1–N7 requirement IDs preserved in §9.7

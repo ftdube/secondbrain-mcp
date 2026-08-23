@@ -6,6 +6,13 @@ Self-hosted MCP server giving Claude mobile access to an Obsidian vault via 5 to
 
 Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid search.
 
+## Docs
+- [`BRD.md`](BRD.md) — full requirements (the `FR-*`/`NFR-*` IDs referenced below are defined there)
+- [`RISKS.md`](RISKS.md) — risk register
+- [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) — open gaps/backlog, prioritized by label
+- [`next-steps.md`](next-steps.md) — phase roadmap and trigger conditions
+- [`README.md`](README.md) — user-facing setup and architecture
+
 ## Hard rules
 - **5 tools** — do not add tools without deliberate design decision; each tool costs ~250 tokens per session
 - **FTS5-only in Phase 1a** — no embeddings, no sqlite-vec, no ONNX imports
@@ -14,6 +21,7 @@ Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid s
 - **`note` writes to outbox only** — never writes directly to the vault; push-sync sidecar handles the git commit/push independently
 - **`propose_edit` never touches the vault or git** — it emits a diff to the outbox; push-sync routes `*.patch.md` to `Proposals/`
 - **Applying a proposal is a command, never a conversation** — run `make apply-proposals` (→ `scripts/apply_proposals.py`, `git apply --3way`). Never read, reason about, or hand-apply a `Proposals/*.patch.md` file yourself
+- **`BRD.md` is a requirements document, not a log** — state current requirements and status only; no narrative session-by-session history. Risks belong in `RISKS.md`; open issues/backlog belong in GitHub Issues, not a BRD table. Git history and PRs are the log
 
 ## Non-obvious
 - `mcp.http_app()` is the fastmcp 2.x method for the ASGI app. If missing in the installed version, try `mcp.streamable_http_app()` then `mcp.sse_app()` — the method name varies across minor versions

@@ -3,7 +3,7 @@ SecondBrain MCP server — Phase 1a (FTS5 keyword search).
 
 Five tools:
   get_overview()               — context.md + _map.md (session start)
-  search(query)                — FTS5 keyword search, top 5 excerpts
+  search(query)                — FTS5 keyword search, top 10 excerpts
   read_note(path)               — full note by vault-relative path
   note(title, content)          — save a draft note to the vault inbox
   propose_edit(edits, rationale) — draft a reviewable diff against one or more existing notes, atomically
@@ -20,19 +20,20 @@ scripts/apply_proposals.py — never by a model. See agents.md.
 import asyncio
 import difflib
 import hashlib
-from datetime import datetime
 import logging
 import os
 import re
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
 
 import uvicorn
 from fastmcp import FastMCP
-from jwt import PyJWKClient, decode as jwt_decode, PyJWTError
-from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+from jwt import PyJWKClient, PyJWTError
+from jwt import decode as jwt_decode
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -87,8 +88,7 @@ def build_index(vault_path: Path, db_path: Path) -> int:
         rel = str(md.relative_to(effective))
         if "Chat Archive" in rel:
             continue
-        for chunk in _iter_chunks(rel, md.read_text(errors="replace")):
-            rows.append(chunk)
+        rows.extend(_iter_chunks(rel, md.read_text(errors="replace")))
     conn.executemany("INSERT INTO chunks_fts VALUES (?, ?, ?)", rows)
     conn.commit()
     conn.close()
@@ -141,7 +141,7 @@ def get_overview() -> str:
 
 @mcp.tool()
 def search(query: str) -> str:
-    """Search the vault. Returns up to 5 excerpts (path, heading, 200-char snippet)."""
+    """Search the vault. Returns up to 10 excerpts (path, heading, 200-char snippet)."""
     SEARCH_COUNTER.inc()
     conn = sqlite3.connect(DB_PATH)
     try:
@@ -207,7 +207,7 @@ def note(title: str, content: str) -> str:
     filename = _note_filename(title)
     dest = OUTBOX_PATH / filename
     if dest.exists():
-        filename = f"{filename[:-3]}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+        filename = f"{filename[:-3]}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.md"
         dest = OUTBOX_PATH / filename
     dest.write_text(f"# {title}\n\n{content}\n")
     return f"Saved to inbox: {filename}"

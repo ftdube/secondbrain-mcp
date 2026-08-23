@@ -36,6 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - run: apt-get update && apt-get install -y --no-install-recommends git
       - run: pip install -r requirements.txt -r requirements-dev.txt --quiet
       - run: pytest tests/ -v
 

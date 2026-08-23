@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.1 (Draft) |
+| Document version | 1.2 (Draft) |
 | System / API version documented | 1.1.0 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
@@ -18,6 +18,7 @@
 |---|---|---|---|
 | 1.0 | 2026-08-23 | Claude Code | Initial issue. Covers the Phase 1a service (`get_overview`, `search`, `read_note`, `note`) plus `propose_edit` (including F8 multi-file atomic proposals), authentication, and common cross-tool requirements. |
 | 1.1 | 2026-08-23 | Claude Code | Coverage audit: added §9.9 (Indexing & Chunking, `IDX`) to give the previously-untraced `_iter_chunks`/`build_index` behavior its own requirement IDs; reworked §16 RTM into an index pointing at inline `# BRD:` traceability comments now present in every `tests/test_*.py` test function; added OI-7..OI-10 for coverage gaps found during the audit (counters never asserted, the primary vault-symlink branch never exercised, `get_overview`'s exact heading/separator format never asserted, wholesale-reindex-clears-stale-rows never proven). No requirement's *content* changed — this revision only adds requirements and corrects traceability claims. |
+| 1.2 | 2026-08-23 | Claude Code | Resolved the `search` result-count discrepancy (RISK-1/OI-1): `server.py`'s docstring and `README.md` now say 10, matching the actual `LIMIT` and `FR-SRCH-2` — no runtime behavior changed. Added `NFR-PROP-10`, the Prometheus-counter requirement for `propose_edit` that was missing despite the counter existing in code since v1.1; updated §13's source reference accordingly. Added §9.10 Vault Path Blacklist (`BLK`, FR-BLK-1..5, NFR-BLK-1..3), a **not-yet-implemented** operator-requested capability to exclude configured vault subdirectories from `search` and `read_note`; flagged its interaction with `propose_edit` (deliberately out of scope) as OI-11 rather than resolving it unilaterally. |
 
 ### Approval
 
@@ -208,12 +209,10 @@ Each requirement has a stable ID of the form `FR-<AREA>-<n>` or `NFR-<AREA>-<n>`
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
 | FR-SRCH-1 | The tool SHALL accept a single free-text `query` string and match it against the FTS5 `chunks_fts` table using `porter unicode61` tokenization. | Must | Implemented |
-| FR-SRCH-2 | Matching rows SHALL be ordered by FTS5 `rank` and limited to at most **10** results per call. ⚠ See note below. | Must | Implemented |
+| FR-SRCH-2 | Matching rows SHALL be ordered by FTS5 `rank` and limited to at most **10** results per call. | Must | Implemented |
 | FR-SRCH-3 | Each result SHALL surface the note's vault-relative path, the heading of the containing chunk, and a ~30-token snippet with the match ellipsized (`…`). | Must | Implemented |
 | FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase. | Must | Implemented |
 | FR-SRCH-5 | If zero rows match after any retry, the tool SHALL return the literal string `"No results."`. | Must | Implemented |
-
-> ⚠ **Documentation discrepancy (OI-1):** the tool's own docstring and `README.md` both state "top 5 excerpts," but the implemented SQL `LIMIT` is 10. FR-SRCH-2 documents actual runtime behavior as the source of truth; see §17 for the reconciliation recommendation.
 
 **Non-Functional**
 
@@ -295,6 +294,7 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | NFR-PROP-7 (N7) | No full-vault replication or additional off-box copy SHALL be introduced by this feature. | Must | Implemented |
 | NFR-PROP-8 (N8, new) | Multi-file atomicity (FR-PROP-8) SHALL be enforced at the application level: `apply_proposals.py` SHALL always run a full-patch dry-run `check()` before `apply_one()`, and skip the real apply entirely on any check failure. `git apply` itself does **not** guarantee cross-file atomicity within one patch — verified: a bare `git apply --3way` on a patch with one drifted file among several mutates the earlier, non-drifted files before failing on the later one. | Must | Implemented; regression-tested |
 | NFR-PROP-9 (N9, new) | The diff's `index` line SHALL use a dummy `0000000..0000000` blob pair, never a real git blob hash. A real hash lets `git apply --3way` locate the historical blob and attempt a genuine content merge on drift — verified this silently writes `<<<<<<<` conflict markers into the note while `--check` reports success (false-clean). The dummy hash forces plain context matching, trading 3-way merge resilience for safety. | Must | Implemented; regression-tested |
+| NFR-PROP-10 (new) | Each call SHALL increment a dedicated Prometheus counter `mcp_propose_edits_total`, consistent with every other tool's NFR-COM-4 instance (NFR-OVW-2, NFR-SRCH-2, NFR-READ-1, NFR-NOTE-2). This requirement was missing from document v1.0/v1.1 despite the counter already existing in code since `propose_edit` was first built — added here to close that documentation gap, not to change behavior. | Must | Implemented (counter has existed since v1.1); test coverage still open — see OI-7 |
 
 ### 9.8 Authentication (`AUTH`)
 
@@ -334,6 +334,30 @@ Added in this revision (v1.1 of this document): `_iter_chunks` and `build_index`
 | FR-IDX-3 | Headings of level H4 or deeper SHALL NOT be treated as chunk boundaries; they remain part of the enclosing chunk's body. | Must | Implemented |
 | FR-IDX-4 | Notes under any directory literally named `Chat Archive` SHALL be excluded from indexing (they remain readable via `read_note`/`propose_edit` — see §10). | Must | Implemented |
 | FR-IDX-5 | Re-indexing SHALL be wholesale (drop and rebuild the FTS5 table from a full vault re-scan), not incremental. | Must | Implemented — see OI-10 for a coverage gap |
+
+### 9.10 Vault Path Blacklist (`BLK`)
+
+Added in document v1.2, proposed by the operator: today, `Chat Archive` directories are the only excluded content, and that exclusion only applies to indexing (FR-IDX-4) — `read_note` and `propose_edit` can still read anything under `Chat Archive`, per §10's existing note that "indexing exclusion is not an access-control boundary." This section specifies a general, operator-configured blacklist that closes that gap for a configurable set of subdirectories, for `search` and `read_note` specifically. **Not yet implemented** — this is a requirements-only addition in this revision, scoped and written to be built against.
+
+**Functional**
+
+| ID | Requirement | Priority | Status |
+|---|---|---|---|
+| FR-BLK-1 | The server SHALL support an operator-configured list of vault-relative directory prefixes — proposed as a comma-separated `VAULT_BLACKLIST` environment variable, mirroring the existing `AUTH_PUBLIC_EXTRA` convention (FR-AUTH-2) — that are excluded from indexing and from `read_note`. | Must | Not implemented — proposed |
+| FR-BLK-2 | `search` SHALL NOT return excerpts from any note under a blacklisted prefix. Enforcement SHALL happen at index-build time (the note is never indexed), the same mechanism `FR-IDX-4` already uses for `Chat Archive` — `VAULT_BLACKLIST` is additive to, not a replacement for, the existing hardcoded `Chat Archive` exclusion. | Must | Not implemented — proposed |
+| FR-BLK-3 | `read_note` SHALL return `"Access denied: {path}"` — the same response `FR-READ-2` already uses for an out-of-bounds path — for any in-bounds path under a blacklisted prefix, rather than the file's content. Reusing that exact message is deliberate: a blacklisted path and a genuinely out-of-bounds path SHOULD be indistinguishable to the caller. | Must | Not implemented — proposed |
+| FR-BLK-4 | Blacklist entries SHALL be matched as a path-segment prefix against the note's path relative to the effective vault root — e.g. an entry of `Health/Psychology` excludes everything under `Health/Psychology/`, but SHALL NOT exclude a sibling like `Health/PsychologyNotes.md`. | Must | Not implemented — proposed |
+| FR-BLK-5 | `propose_edit` is explicitly **out of scope** for this blacklist in this revision — a blacklisted note remains fully proposable. This is a deliberate scope decision (the operator's request named `search` and `read` only), not an oversight; see the note below. | Must (as scoped) | N/A — deliberately excluded |
+
+> **Open question carried forward, not resolved here:** FR-BLK-5 means a note can be simultaneously unreadable via `read_note` and yet still editable via `propose_edit` (which reads the same file directly from the vault mirror, bypassing `read_note` entirely). Whether that's the intended posture — e.g. a "don't surface this in casual reads, but AI-drafted edits are still fine" policy — or an inconsistency to close later is an operator decision, not a documentation one. Flagged as OI-11.
+
+**Non-Functional**
+
+| ID | Requirement | Priority | Status |
+|---|---|---|---|
+| NFR-BLK-1 | Blacklist configuration changes SHALL take effect on the next reindex, consistent with the existing freshness bound (NFR-COM-5) — no separate config-reload mechanism is required since reindexing already runs on a schedule and on `POST /reindex`. | Should | Not implemented — proposed |
+| NFR-BLK-2 | An empty or unset `VAULT_BLACKLIST` SHALL be exactly equivalent to today's behavior (only the hardcoded `Chat Archive` exclusion applies) — the feature SHALL be backward compatible by default. | Must | Not implemented — proposed |
+| NFR-BLK-3 | Blacklist filtering SHALL be applied *after* the existing traversal-safe path resolution (FR-COM-1) succeeds, as an additional filter — never as a replacement for it, and never in a way that weakens FR-COM-1's traversal/symlink-escape guarantee. | Must | Not implemented — proposed |
 
 ## 10. Data Requirements
 
@@ -396,7 +420,7 @@ This section consolidates and cross-references §9.2 and §9.8; only requirement
 | `mcp_searches_total`, `mcp_search_chars_total`, `mcp_search_misses_total` | Counter | NFR-SRCH-2, NFR-SRCH-3 |
 | `mcp_reads_total`, `mcp_read_chars_total` | Counter | NFR-READ-1 |
 | `mcp_notes_total` | Counter | NFR-NOTE-2 |
-| `mcp_propose_edits_total` | Counter | (new in this revision) |
+| `mcp_propose_edits_total` | Counter | NFR-PROP-10 |
 
 All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheus scraping; no dashboards or alerting rules are defined by this document beyond the Phase 1b trigger already specified in `next-steps.md` (NFR-SRCH-3).
 
@@ -404,7 +428,7 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 
 | ID | Risk | Likelihood | Impact | Mitigation / Status |
 |---|---|---|---|---|
-| RISK-1 | `search`'s own docstring/README claim "top 5" results; the implemented `LIMIT` is 10. | Low | Low (doc drift, not a defect) | Reconcile docs or code — see OI-1 |
+| RISK-1 | *(Resolved in document v1.2)* `search`'s own docstring/README claimed "top 5" results while the implemented `LIMIT` was 10. | — | — | **Resolved** — docstring (`server.py`) and `README.md` now say 10, matching `FR-SRCH-2` and the actual `LIMIT`. No runtime behavior changed. |
 | RISK-2 | `read_note` has no size cap; one very large note could consume a disproportionate share of a session's token budget. | Low (curated personal vault) | Medium | Not mitigated — see OI-2 |
 | RISK-3 | `/reindex` is intentionally unauthenticated; if `MCP_BASE_URL` were ever exposed without the existing OAuth-fronted ingress, any anonymous caller could trigger repeated reindex load. | Low | Low (rebuild cost only, no data exposure) | Keep `/reindex` behind the existing ingress; do not expose it as a separate public route |
 | RISK-4 | JWKS keys are cached in-process; a Dex signing-key rotation without a coordinated pod restart causes a window of `401`s for every client. | Low (infrequent rotation) | Medium (full-service outage until restart) | Documented operational runbook step in `agents.md` |
@@ -431,8 +455,9 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 | `SRCH` | FR-SRCH-1, FR-SRCH-4, FR-SRCH-5 | FR-SRCH-2 (exact 10-row limit), FR-SRCH-3 (exact snippet shape); NFR-SRCH-2, NFR-SRCH-3 — see OI-7 |
 | `READ` | FR-READ-1, FR-READ-2, FR-READ-3 | FR-READ-4 is a documented absence, not positively tested; NFR-READ-1 — see OI-7 |
 | `NOTE` | *(none)* | FR-NOTE-1..5, NFR-NOTE-1..4 — see OI-6 |
-| `PROP` | FR-PROP-1, FR-PROP-2, FR-PROP-3, FR-PROP-4, FR-PROP-6, FR-PROP-7, FR-PROP-8, NFR-PROP-2, NFR-PROP-3, NFR-PROP-8, NFR-PROP-9 | NFR-PROP-1, NFR-PROP-4, NFR-PROP-5, NFR-PROP-6, NFR-PROP-7 (process/architecture properties, not unit-testable in isolation) |
+| `PROP` | FR-PROP-1, FR-PROP-2, FR-PROP-3, FR-PROP-4, FR-PROP-6, FR-PROP-7, FR-PROP-8, NFR-PROP-2, NFR-PROP-3, NFR-PROP-8, NFR-PROP-9 | NFR-PROP-1, NFR-PROP-4, NFR-PROP-5, NFR-PROP-6, NFR-PROP-7 (process/architecture properties, not unit-testable in isolation); NFR-PROP-10 — see OI-7 |
 | `AUTH` | *(none)* | FR-AUTH-1..6, NFR-AUTH-1..7 — see OI-4, RISK-8 |
+| `BLK` | *(none — not yet implemented)* | FR-BLK-1..5, NFR-BLK-1..3 — no code exists yet to test; see §9.10 |
 
 RISK-5's mitigation cites `test_multi_file_patch_atomic_when_one_file_drifted` by name; that reference and the ones in `agents.md`/`next-steps.md` remain accurate as of this revision (verified while writing it, not just carried forward).
 
@@ -440,7 +465,7 @@ RISK-5's mitigation cites `test_multi_file_patch_atomic_when_one_file_drifted` b
 
 | ID | Issue | Recommendation |
 |---|---|---|
-| OI-1 | `search`'s docstring and `README.md` say "top 5"; code returns up to 10. | Either lower `LIMIT` to 5 to match the docs, or update the docs/docstring to say 10 — pick one source of truth. |
+| OI-1 | *(Resolved in document v1.2)* `search`'s docstring and `README.md` said "top 5"; code returns up to 10. | **Resolved** — updated the docstring and `README.md` to say 10 (kept the existing `LIMIT`, since the token-budget-vs-recall tradeoff of changing it is a separate product decision, not a documentation fix). |
 | OI-2 | `read_note` has no size cap (NFR-READ-2, RISK-2). | If large notes become a real problem in practice, add a truncation with an explicit `"...(truncated, N bytes total)"` marker rather than a silent cutoff. |
 | OI-3 | `apply_proposals.py` has no concurrency guard (RISK-7). | Add a simple lockfile (e.g. `flock` on a file in the vault repo) before treating concurrent invocations as safe. |
 | OI-4 | `BearerAuthMiddleware` / JWT validation has zero automated test coverage (RISK-8). | Add tests using a fixture-generated RSA keypair and a mocked `PyJWKClient` before relying on FR-AUTH-* as verified rather than merely implemented. |
@@ -450,6 +475,7 @@ RISK-5's mitigation cites `test_multi_file_patch_atomic_when_one_file_drifted` b
 | OI-8 | No test exercises the primary `VAULT_PATH/vault` branch (the git-sync symlink target) of the effective-vault-root resolution used by `_effective_vault`/`_resolve_in_vault` (FR-COM-4) or `build_index`'s parallel copy of the same fallback logic. Every existing test sets `VAULT_PATH` to a bare directory with no nested `vault/` subdirectory, so only the fallback branch has ever run under test. | Add one test per affected function that creates `VAULT_PATH/vault/` and confirms that path — not `VAULT_PATH` itself — is what gets read from. |
 | OI-9 | `get_overview`'s exact `## <filename>` heading and `\n\n---\n\n` separator formatting (FR-OVW-2) is not asserted by any test; `test_get_overview_both_files` only checks that both files' *content* appears somewhere in the result. | Add an exact-match or regex assertion on the heading/separator formatting, not just substring containment. |
 | OI-10 | FR-IDX-5 (wholesale, non-incremental reindex) has no test proving a *second* `build_index` call actually clears rows from a prior run; existing tests only call it once per test and assert the resulting chunk count. | Add a test that indexes vault A, then vault B, and asserts vault A's chunks are gone — not just that vault B's are present. |
+| OI-11 | §9.10's `VAULT_BLACKLIST` (FR-BLK-1..5) deliberately excludes `propose_edit` from enforcement (FR-BLK-5): once built, a note could be simultaneously hidden from `read_note`/`search` yet still editable via `propose_edit`, which reads the vault mirror directly. | Operator decision, not a documentation fix: confirm whether that split posture is intended before or shortly after implementing §9.10, and update FR-BLK-5's status accordingly either way. |
 
 ## 18. Appendices
 

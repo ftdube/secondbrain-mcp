@@ -20,19 +20,20 @@ scripts/apply_proposals.py — never by a model. See agents.md.
 import asyncio
 import difflib
 import hashlib
-from datetime import datetime
 import logging
 import os
 import re
 import sqlite3
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import AsyncIterator
 
 import uvicorn
 from fastmcp import FastMCP
-from jwt import PyJWKClient, decode as jwt_decode, PyJWTError
-from prometheus_client import Counter, generate_latest, CONTENT_TYPE_LATEST
+from jwt import PyJWKClient, PyJWTError
+from jwt import decode as jwt_decode
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -87,8 +88,7 @@ def build_index(vault_path: Path, db_path: Path) -> int:
         rel = str(md.relative_to(effective))
         if "Chat Archive" in rel:
             continue
-        for chunk in _iter_chunks(rel, md.read_text(errors="replace")):
-            rows.append(chunk)
+        rows.extend(_iter_chunks(rel, md.read_text(errors="replace")))
     conn.executemany("INSERT INTO chunks_fts VALUES (?, ?, ?)", rows)
     conn.commit()
     conn.close()
@@ -207,7 +207,7 @@ def note(title: str, content: str) -> str:
     filename = _note_filename(title)
     dest = OUTBOX_PATH / filename
     if dest.exists():
-        filename = f"{filename[:-3]}-{datetime.now().strftime('%Y%m%d-%H%M%S')}.md"
+        filename = f"{filename[:-3]}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.md"
         dest = OUTBOX_PATH / filename
     dest.write_text(f"# {title}\n\n{content}\n")
     return f"Saved to inbox: {filename}"

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import sqlite3
 from pathlib import Path
 
@@ -295,6 +296,15 @@ def _note_setup(tmp_path, monkeypatch):
     return vault, outbox
 
 
+# BRD: FR-COM-5
+def test_note_and_propose_edit_docstrings_state_mutually_exclusive_boundary():
+    note_doc = server.note.__doc__
+    propose_doc = server.propose_edit.__doc__
+    assert "propose_edit" in note_doc
+    assert "note" in propose_doc
+    assert "exact" in propose_doc or "precise" in propose_doc
+
+
 # BRD: FR-NOTE-1, FR-NOTE-5, FR-COM-3
 def test_note_writes_to_outbox(tmp_path, monkeypatch):
     vault, outbox = _note_setup(tmp_path, monkeypatch)
@@ -405,13 +415,68 @@ def test_propose_edit_anchor_ambiguous(tmp_path, monkeypatch):
 
 
 # BRD: FR-PROP-6
-def test_propose_edit_missing_note_routes_to_note_tool(tmp_path, monkeypatch):
+def test_propose_edit_missing_note_with_nonempty_old_fails_loudly(tmp_path, monkeypatch):
     _propose_setup(tmp_path, monkeypatch)
 
     result = server.propose_edit([{"path": "missing.md", "old": "a", "new": "b"}], "r")
 
     assert "No such note" in result
-    assert "note tool" in result
+    assert "old" in result
+
+
+# BRD: FR-PROP-1, FR-PROP-2, FR-PROP-6, FR-PROP-9
+def test_propose_edit_creates_new_file_when_old_omitted(tmp_path, monkeypatch):
+    _vault, outbox = _propose_setup(tmp_path, monkeypatch)
+
+    result = server.propose_edit(
+        [{"path": "new.md", "new": "# New\n\nhello\n"}], "capture a new note"
+    )
+
+    assert result.startswith("Proposed: ")
+    body = next(outbox.glob("*.patch.md")).read_text()
+    assert "new file mode 100644" in body
+    assert "--- /dev/null" in body
+    assert "+++ b/new.md" in body
+    assert "+hello" in body
+
+
+# BRD: FR-PROP-1, FR-PROP-2, FR-PROP-6
+def test_propose_edit_creates_new_file_with_explicit_empty_old(tmp_path, monkeypatch):
+    _propose_setup(tmp_path, monkeypatch)
+
+    result = server.propose_edit(
+        [{"path": "new.md", "old": "", "new": "content\n"}], "r"
+    )
+
+    assert result.startswith("Proposed: ")
+
+
+# BRD: FR-PROP-1, FR-PROP-2, FR-PROP-6
+def test_propose_edit_create_then_edit_same_new_path(tmp_path, monkeypatch):
+    _vault, outbox = _propose_setup(tmp_path, monkeypatch)
+
+    result = server.propose_edit(
+        [
+            {"path": "new.md", "new": "one two\n"},
+            {"path": "new.md", "old": "one", "new": "1"},
+        ],
+        "r",
+    )
+
+    assert result.startswith("Proposed: ")
+    body = next(outbox.glob("*.patch.md")).read_text()
+    assert "+1 two" in body
+
+
+# BRD: FR-PROP-4
+def test_propose_edit_artifact_has_drafted_timestamp(tmp_path, monkeypatch):
+    vault, outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("old")
+
+    server.propose_edit([{"path": "note.md", "old": "old", "new": "new"}], "r")
+
+    body = next(outbox.glob("*.patch.md")).read_text()
+    assert re.search(r"Drafted: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", body)
 
 
 # BRD: FR-COM-1, NFR-PROP-6

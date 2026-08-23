@@ -181,6 +181,11 @@ def search(query: str) -> str:
     return result
 
 
+# NFR-READ-2 (BRD.md OI-2): caps a single response's token cost. Truncation is
+# flagged in-band rather than silent so a caller can tell a note was cut short.
+READ_MAX_CHARS = 20_000
+
+
 @mcp.tool()
 def read_note(path: str) -> str:
     """Read a full vault note by relative path (e.g. 'Homelab/Ocean/Summary.md')."""
@@ -188,7 +193,14 @@ def read_note(path: str) -> str:
     p = _resolve_in_vault(path)
     if p is None:
         return f"Access denied: {path}"
-    result = p.read_text() if p.exists() else f"Not found: {path}"
+    if not p.exists():
+        return f"Not found: {path}"
+    content = p.read_text()
+    if len(content) > READ_MAX_CHARS:
+        total_bytes = len(content.encode())
+        result = content[:READ_MAX_CHARS] + f"\n\n...(truncated, {total_bytes} bytes total)"
+    else:
+        result = content
     READ_CHARS.inc(len(result))
     return result
 

@@ -1,6 +1,6 @@
 import sqlite3
-import server
 
+import server
 
 # ── _iter_chunks ──────────────────────────────────────────────────────────────
 
@@ -68,6 +68,38 @@ def test_build_index_empty_vault(tmp_path):
     assert server.build_index(vault, tmp_path / "index.db") == 0
 
 
+# BRD: FR-IDX-5
+def test_build_index_second_call_clears_stale_rows(tmp_path):
+    db = tmp_path / "index.db"
+    vault_a = tmp_path / "vault_a"
+    vault_a.mkdir()
+    (vault_a / "a.md").write_text("# A\n\ncontent a")
+    server.build_index(vault_a, db)
+
+    vault_b = tmp_path / "vault_b"
+    vault_b.mkdir()
+    (vault_b / "b.md").write_text("# B\n\ncontent b")
+    n = server.build_index(vault_b, db)
+
+    conn = sqlite3.connect(db)
+    paths = [row[0] for row in conn.execute("SELECT path FROM chunks_fts").fetchall()]
+    conn.close()
+    assert n == 1
+    assert paths == ["b.md"]  # a.md's row from the first call is gone, not just uncounted
+
+
+# BRD: FR-COM-4 (build_index's own copy of the effective-vault-root fallback)
+def test_build_index_prefers_nested_vault_dir(tmp_path):
+    mount = tmp_path / "mount"
+    nested = mount / "vault"
+    nested.mkdir(parents=True)
+    (nested / "note.md").write_text("# Inner\n\nbody")
+    (mount / "outer.md").write_text("# Outer\n\nbody")  # sibling to vault/, must be ignored
+
+    n = server.build_index(mount, tmp_path / "index.db")
+    assert n == 1
+
+
 # ── search ────────────────────────────────────────────────────────────────────
 
 def _indexed_db(tmp_path, content: str):
@@ -104,7 +136,7 @@ def test_search_fts_syntax_fallback(tmp_path, monkeypatch):
 
 # ── read_note ─────────────────────────────────────────────────────────────────
 
-# BRD: FR-READ-1 (VAULT_PATH fallback branch only — see BRD.md OI-8 for the untested VAULT_PATH/vault branch)
+# BRD: FR-READ-1 (VAULT_PATH fallback branch — see test_read_note_prefers_nested_vault_dir for the other branch)
 def test_read_note_valid(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -138,9 +170,44 @@ def test_read_note_nested_path(tmp_path, monkeypatch):
     assert server.read_note("sub/note.md") == "nested"
 
 
+# BRD: FR-COM-4 (the previously-untested VAULT_PATH/vault branch — mirrors the git-sync symlink target)
+def test_read_note_prefers_nested_vault_dir(tmp_path, monkeypatch):
+    mount = tmp_path / "mount"
+    nested = mount / "vault"
+    nested.mkdir(parents=True)
+    (nested / "note.md").write_text("nested-root")
+    (mount / "note.md").write_text("outer-root")  # must NOT be the one read
+    monkeypatch.setattr(server, "VAULT_PATH", mount)
+    assert server.read_note("note.md") == "nested-root"
+
+
+# BRD: FR-READ-4, NFR-READ-2
+def test_read_note_truncates_large_files(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    content = "x" * (server.READ_MAX_CHARS + 500)
+    (vault / "big.md").write_text(content)
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+
+    result = server.read_note("big.md")
+
+    assert len(result) < len(content)
+    assert result.startswith("x" * server.READ_MAX_CHARS)
+    assert f"truncated, {len(content.encode())} bytes total" in result
+
+
+# BRD: FR-READ-1 (below the cap — must not be truncated)
+def test_read_note_under_cap_not_truncated(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "small.md").write_text("well under the cap")
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+    assert server.read_note("small.md") == "well under the cap"
+
+
 # ── get_overview ──────────────────────────────────────────────────────────────
 
-# BRD: FR-OVW-1, FR-OVW-2 (content presence only — exact heading/separator format not asserted, see BRD.md OI-9)
+# BRD: FR-OVW-1 (content presence — see test_get_overview_exact_format for the precise FR-OVW-2 shape)
 def test_get_overview_both_files(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
     vault.mkdir()
@@ -150,6 +217,17 @@ def test_get_overview_both_files(tmp_path, monkeypatch):
     result = server.get_overview()
     assert "my context" in result
     assert "my map" in result
+
+
+# BRD: FR-OVW-2
+def test_get_overview_exact_format(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "context.md").write_text("my context")
+    (vault / "_map.md").write_text("my map")
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+    result = server.get_overview()
+    assert result == "## context.md\n\nmy context\n\n---\n\n## _map.md\n\nmy map"
 
 
 # BRD: FR-OVW-3
@@ -169,6 +247,67 @@ def test_get_overview_no_files(tmp_path, monkeypatch):
     vault.mkdir()
     monkeypatch.setattr(server, "VAULT_PATH", vault)
     assert server.get_overview() == "Vault unavailable."
+
+
+# ── note ──────────────────────────────────────────────────────────────────────
+
+def _note_setup(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    outbox = tmp_path / "outbox"
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+    monkeypatch.setattr(server, "OUTBOX_PATH", outbox)
+    return vault, outbox
+
+
+# BRD: FR-NOTE-1, FR-NOTE-5, FR-COM-3
+def test_note_writes_to_outbox(tmp_path, monkeypatch):
+    vault, outbox = _note_setup(tmp_path, monkeypatch)
+
+    result = server.note("My Title", "some content")
+
+    assert result == "Saved to inbox: My-Title.md"
+    dest = outbox / "My-Title.md"
+    assert dest.exists()
+    assert dest.read_text() == "# My Title\n\nsome content\n"
+    assert list(vault.rglob("*.md")) == []  # never written to the vault itself
+
+
+# BRD: FR-NOTE-2
+def test_note_filename_sanitization(tmp_path, monkeypatch):
+    _note_setup(tmp_path, monkeypatch)
+    result = server.note("Hello, World! @#$", "x")
+    assert result == "Saved to inbox: Hello-World.md"
+
+
+# BRD: FR-NOTE-2 (empty-after-sanitization edge case)
+def test_note_filename_defaults_to_untitled(tmp_path, monkeypatch):
+    _note_setup(tmp_path, monkeypatch)
+    result = server.note("!!!", "x")
+    assert result == "Saved to inbox: untitled.md"
+
+
+# BRD: FR-NOTE-2 (80-char truncation)
+def test_note_filename_truncated_to_80_chars(tmp_path, monkeypatch):
+    _vault, outbox = _note_setup(tmp_path, monkeypatch)
+    title = "a" * 200
+    server.note(title, "x")
+    files = list(outbox.glob("*.md"))
+    assert len(files) == 1
+    assert files[0].stem == "a" * 80
+
+
+# BRD: FR-NOTE-3
+def test_note_collision_appends_timestamp(tmp_path, monkeypatch):
+    _vault, outbox = _note_setup(tmp_path, monkeypatch)
+    outbox.mkdir(parents=True)
+    (outbox / "My-Title.md").write_text("existing draft")
+
+    result = server.note("My Title", "new content")
+
+    assert result != "Saved to inbox: My-Title.md"
+    assert result.startswith("Saved to inbox: My-Title-")
+    assert (outbox / "My-Title.md").read_text() == "existing draft"  # untouched
 
 
 # ── propose_edit ──────────────────────────────────────────────────────────────
@@ -354,3 +493,79 @@ def test_propose_edit_multi_file_skips_unchanged_files(tmp_path, monkeypatch):
     assert body.count("diff --git") == 1
     assert "b.md" in body
     assert "a.md" not in body
+
+
+# ── Prometheus counters (OI-7) ───────────────────────────────────────────────
+# Counters are module-level globals shared across the whole test session, so
+# every assertion here is delta-based (before/after one call), never absolute.
+
+def _value(counter):
+    return counter._value.get()
+
+
+# BRD: NFR-OVW-2
+def test_get_overview_increments_counters(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "context.md").write_text("hi")
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+
+    before_calls, before_chars = _value(server.OVERVIEW_COUNTER), _value(server.OVERVIEW_CHARS)
+    result = server.get_overview()
+
+    assert _value(server.OVERVIEW_COUNTER) == before_calls + 1
+    assert _value(server.OVERVIEW_CHARS) == before_chars + len(result)
+
+
+# BRD: NFR-SRCH-2
+def test_search_increments_counters(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+
+    before_calls, before_chars = _value(server.SEARCH_COUNTER), _value(server.SEARCH_CHARS)
+    result = server.search("Python")
+
+    assert _value(server.SEARCH_COUNTER) == before_calls + 1
+    assert _value(server.SEARCH_CHARS) == before_chars + len(result)
+
+
+# BRD: NFR-SRCH-2, NFR-SRCH-3
+def test_search_no_results_increments_miss_counter(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Hello\n\nworld")
+    monkeypatch.setattr(server, "DB_PATH", db)
+
+    before = _value(server.SEARCH_MISSES)
+    server.search("xyzzy_not_found")
+
+    assert _value(server.SEARCH_MISSES) == before + 1
+
+
+# BRD: NFR-READ-1
+def test_read_note_increments_counters(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "note.md").write_text("hello")
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+
+    before_calls, before_chars = _value(server.READ_COUNTER), _value(server.READ_CHARS)
+    result = server.read_note("note.md")
+
+    assert _value(server.READ_COUNTER) == before_calls + 1
+    assert _value(server.READ_CHARS) == before_chars + len(result)
+
+
+# BRD: NFR-NOTE-2
+def test_note_increments_counter(tmp_path, monkeypatch):
+    _note_setup(tmp_path, monkeypatch)
+    before = _value(server.NOTE_COUNTER)
+    server.note("t", "c")
+    assert _value(server.NOTE_COUNTER) == before + 1
+
+
+# BRD: NFR-PROP-10
+def test_propose_edit_increments_counter(tmp_path, monkeypatch):
+    vault, _outbox = _propose_setup(tmp_path, monkeypatch)
+    (vault / "note.md").write_text("old\n")
+    before = _value(server.PROPOSE_COUNTER)
+    server.propose_edit([{"path": "note.md", "old": "old", "new": "new"}], "r")
+    assert _value(server.PROPOSE_COUNTER) == before + 1

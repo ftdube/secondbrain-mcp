@@ -169,3 +169,15 @@ def test_oauth_protected_resource_metadata():
 def test_mcp_asgi_mounted_at_expected_path():
     paths = [route.path for route in server.mcp_asgi.routes]
     assert "/mcp" in paths
+
+
+# BRD: NFR-AUTH-2
+def test_jwks_client_is_cached_across_calls(monkeypatch):
+    # Was previously marked "not unit-testable" in the RTM; the caching
+    # mechanism itself demonstrably is, even though the "requires a pod
+    # restart after key rotation" consequence is an operational fact, not
+    # something a unit test asserts.
+    monkeypatch.setattr(server, "_jwks_client", None)
+    first = server._get_jwks()
+    second = server._get_jwks()
+    assert first is second

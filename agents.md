@@ -2,7 +2,7 @@
 
 ## What this is
 Self-hosted MCP server giving Claude mobile access to an Obsidian vault via 5 tools:
-`get_overview()` · `search(query)` · `read_note(path)` · `note(title, content)` · `propose_edit(edits, rationale)`
+`get_overview()` · `search(query)` · `read_note(path, offset=0)` · `note(title, content)` · `propose_edit(edits, rationale)`
 
 Phase 1a: FTS5 keyword search only. Phase 1b adds ONNX embeddings + RRF hybrid search.
 

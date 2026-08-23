@@ -15,6 +15,8 @@ Inbox: notes written to OUTBOX_PATH; push-sync sidecar commits and pushes them.
 Proposals: propose_edit also writes to OUTBOX_PATH (as *.patch.md); push-sync
 routes those to Proposals/ instead of Inbox/. Applied out of band via
 scripts/apply_proposals.py — never by a model. See agents.md.
+Blacklist: VAULT_BLACKLIST (comma-separated vault-relative directory prefixes)
+excludes matching notes from indexing, read_note, and propose_edit.
 """
 
 import asyncio
@@ -49,6 +51,21 @@ DEX_JWKS_URI  = os.environ.get("DEX_JWKS_URI", f"{DEX_ISSUER}/keys")
 MCP_CLIENT_ID = os.environ["MCP_CLIENT_ID"]
 MCP_BASE_URL  = os.environ["MCP_BASE_URL"]
 OUTBOX_PATH   = Path(os.environ.get("OUTBOX_PATH", "/outbox"))
+
+# FR-BLK-1: comma-separated vault-relative directory prefixes excluded from
+# indexing, read_note, and propose_edit — mirrors AUTH_PUBLIC_EXTRA's convention.
+# Empty/unset is exactly today's behavior (NFR-BLK-2).
+_blacklist_raw = os.environ.get("VAULT_BLACKLIST", "")
+VAULT_BLACKLIST: tuple[tuple[str, ...], ...] = tuple(
+    Path(p.strip()).parts for p in _blacklist_raw.split(",") if p.strip()
+)
+
+
+def _is_blacklisted(rel_path: Path) -> bool:
+    """FR-BLK-4: path-segment prefix match, so 'Health/Psychology' excludes
+    'Health/Psychology/*' but not the sibling file 'Health/PsychologyNotes.md'."""
+    parts = rel_path.parts
+    return any(parts[: len(prefix)] == prefix for prefix in VAULT_BLACKLIST)
 
 
 # ── Indexer ───────────────────────────────────────────────────────────────────
@@ -85,8 +102,11 @@ def build_index(vault_path: Path, db_path: Path) -> int:
         effective = vault_path
     rows: list[tuple[str, str, str]] = []
     for md in sorted(effective.rglob("*.md")):
-        rel = str(md.relative_to(effective))
+        rel_path = md.relative_to(effective)
+        rel = str(rel_path)
         if "Chat Archive" in rel:
+            continue
+        if _is_blacklisted(rel_path):
             continue
         rows.extend(_iter_chunks(rel, md.read_text(errors="replace")))
     conn.executemany("INSERT INTO chunks_fts VALUES (?, ?, ?)", rows)
@@ -116,10 +136,13 @@ def _effective_vault() -> Path:
 
 
 def _resolve_in_vault(path: str) -> Path | None:
-    """Resolve a vault-relative path, rejecting traversal and symlink escape. None if outside the vault."""
-    effective = _effective_vault()
+    """Resolve a vault-relative path, rejecting traversal, symlink escape (FR-COM-1),
+    and blacklisted prefixes (FR-BLK-3/5, NFR-BLK-3). None if inaccessible."""
+    effective = _effective_vault().resolve()
     p = (effective / path).resolve()
-    if not p.is_relative_to(effective.resolve()):
+    if not p.is_relative_to(effective):
+        return None
+    if _is_blacklisted(p.relative_to(effective)):
         return None
     return p
 

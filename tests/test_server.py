@@ -205,6 +205,39 @@ def test_read_note_under_cap_not_truncated(tmp_path, monkeypatch):
     assert server.read_note("small.md") == "well under the cap"
 
 
+# BRD: FR-READ-5
+def test_read_note_pagination_continues_from_offset(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    content = "a" * server.READ_MAX_CHARS + "b" * 500
+    (vault / "big.md").write_text(content)
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+
+    first = server.read_note("big.md")
+    assert f"offset={server.READ_MAX_CHARS} to continue" in first
+
+    second = server.read_note("big.md", offset=server.READ_MAX_CHARS)
+    assert second == "b" * 500  # no further truncation marker — reached the end
+
+
+# BRD: FR-READ-5 (offset at or beyond the file's length)
+def test_read_note_offset_beyond_length_returns_empty(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "small.md").write_text("short")
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+    assert server.read_note("small.md", offset=1000) == ""
+
+
+# BRD: FR-READ-5 (negative offset is clamped, not an error — FR-COM-2)
+def test_read_note_negative_offset_clamped_to_zero(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "small.md").write_text("hello")
+    monkeypatch.setattr(server, "VAULT_PATH", vault)
+    assert server.read_note("small.md", offset=-5) == "hello"
+
+
 # ── get_overview ──────────────────────────────────────────────────────────────
 
 # BRD: FR-OVW-1 (content presence — see test_get_overview_exact_format for the precise FR-OVW-2 shape)

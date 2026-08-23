@@ -4,7 +4,7 @@ SecondBrain MCP server — Phase 1a (FTS5 keyword search).
 Five tools:
   get_overview()               — context.md + _map.md (session start)
   search(query)                — FTS5 keyword search, top 10 excerpts
-  read_note(path)               — full note by vault-relative path
+  read_note(path, offset=0)     — note by vault-relative path, paginated past ~20,000 chars
   note(title, content)          — save a draft note to the vault inbox
   propose_edit(edits, rationale) — draft a reviewable diff against one or more existing notes, atomically
 
@@ -187,8 +187,8 @@ READ_MAX_CHARS = 20_000
 
 
 @mcp.tool()
-def read_note(path: str) -> str:
-    """Read a full vault note by relative path (e.g. 'Homelab/Ocean/Summary.md')."""
+def read_note(path: str, offset: int = 0) -> str:
+    """Read a vault note by relative path (e.g. 'Homelab/Ocean/Summary.md'). Notes longer than ~20,000 characters are truncated; pass the offset from a truncated response's marker to continue reading."""
     READ_COUNTER.inc()
     p = _resolve_in_vault(path)
     if p is None:
@@ -196,11 +196,16 @@ def read_note(path: str) -> str:
     if not p.exists():
         return f"Not found: {path}"
     content = p.read_text()
-    if len(content) > READ_MAX_CHARS:
+    offset = max(0, offset)
+    chunk = content[offset : offset + READ_MAX_CHARS]
+    next_offset = offset + len(chunk)
+    if next_offset < len(content):
         total_bytes = len(content.encode())
-        result = content[:READ_MAX_CHARS] + f"\n\n...(truncated, {total_bytes} bytes total)"
-    else:
-        result = content
+        chunk += (
+            f"\n\n...(truncated, {total_bytes} bytes total"
+            f"; call read_note with offset={next_offset} to continue)"
+        )
+    result = chunk
     READ_CHARS.inc(len(result))
     return result
 

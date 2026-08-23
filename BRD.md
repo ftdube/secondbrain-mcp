@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.4 (Draft) |
+| Document version | 1.5 (Draft) |
 | System / API version documented | 1.1.0 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
@@ -21,6 +21,7 @@
 | 1.2 | 2026-08-23 | Claude Code | Resolved the `search` result-count discrepancy (RISK-1/OI-1): `server.py`'s docstring and `README.md` now say 10, matching the actual `LIMIT` and `FR-SRCH-2` — no runtime behavior changed. Added `NFR-PROP-10`, the Prometheus-counter requirement for `propose_edit` that was missing despite the counter existing in code since v1.1; updated §13's source reference accordingly. Added §9.10 Vault Path Blacklist (`BLK`, FR-BLK-1..5, NFR-BLK-1..3), a **not-yet-implemented** operator-requested capability to exclude configured vault subdirectories from `search` and `read_note`; flagged its interaction with `propose_edit` (deliberately out of scope) as OI-11 rather than resolving it unilaterally. |
 | 1.3 | 2026-08-23 | Claude Code | Resolved OI-11 per operator follow-up: `propose_edit` now SHALL honor `VAULT_BLACKLIST` too (FR-BLK-5 rewritten from "explicitly out of scope" to a requirement). Directed enforcement into the `_resolve_in_vault` helper shared by `read_note` and `propose_edit` (NFR-BLK-3 rewritten) rather than adding a second, independent check — same behavior, one implementation instead of two that could drift apart. |
 | 1.4 | 2026-08-23 | Claude Code | Resolved every remaining open issue (OI-2 through OI-10): added `read_note`'s `READ_MAX_CHARS` truncation cap (FR-READ-4, NFR-READ-2 rewritten from a "gap" callout to a positive requirement); added a non-blocking `flock` lock to `scripts/apply_proposals.py` guarding the whole run (RISK-7 resolved); added `tests/test_auth.py` covering `BearerAuthMiddleware` end-to-end against a real RSA-signed JWT (RISK-8 resolved) plus a smoke test pinning the `/mcp` mount path; added a `note` test section (FR-NOTE-1..5); added delta-based Prometheus counter tests for every tool; added tests for the previously-unexercised primary `VAULT_PATH/vault` branch (`read_note` and `build_index` each have their own copy of that fallback); added an exact-format `get_overview` test; added a test proving `build_index`'s wholesale rebuild actually clears a prior run's rows. §16 RTM rewritten again to reflect the new coverage state. 69 tests now pass, up from 39 in v1.0. |
+| 1.5 | 2026-08-23 | Claude Code | PR review feedback (before merge): v1.4's `read_note` truncation cap (FR-READ-4) had no way to fetch the remainder of a note beyond `READ_MAX_CHARS` — a genuine gap, not just a documentation one. Added `FR-READ-5`: `read_note` now accepts an optional character `offset` parameter, and a truncated response's marker states the offset to pass to continue reading. `FR-READ-4` reworded to stop claiming "no pagination is offered." Regression-tested: `test_read_note_pagination_continues_from_offset`, `test_read_note_offset_beyond_length_returns_empty`, `test_read_note_negative_offset_clamped_to_zero`. 72 tests now pass. |
 
 ### Approval
 
@@ -235,7 +236,8 @@ Each requirement has a stable ID of the form `FR-<AREA>-<n>` or `NFR-<AREA>-<n>`
 | FR-READ-1 | The tool SHALL accept a single vault-relative `path` and return the full raw text of that file. | Must | Implemented |
 | FR-READ-2 | An out-of-bounds path (per FR-COM-1) SHALL return `"Access denied: {path}"`. | Must | Implemented |
 | FR-READ-3 | An in-bounds path that does not exist SHALL return `"Not found: {path}"`. | Must | Implemented |
-| FR-READ-4 | Responses SHALL be capped at `READ_MAX_CHARS` (20,000) characters. Content beyond the cap SHALL be truncated with an explicit `\n\n...(truncated, {N} bytes total)` marker appended — never silently — where `{N}` is the full file's UTF-8-encoded byte length. No pagination is offered; a truncated read has no way to fetch the remainder. | Must | Implemented (resolved in document v1.4 — see OI-2) |
+| FR-READ-4 | Responses SHALL be capped at `READ_MAX_CHARS` (20,000) characters per call. Content beyond the cap SHALL be truncated with an explicit marker appended — never silently — stating the full file's UTF-8-encoded byte size. Per FR-READ-5, the marker SHALL also state the offset to pass on the next call to continue reading. | Must | Implemented (resolved in document v1.4 — see OI-2) |
+| FR-READ-5 (new, document v1.5) | `read_note` SHALL accept an optional `offset` integer parameter (default `0`), a **character** offset into the note's content — not a byte offset, since Python string slicing is always code-point-safe while a raw byte offset could split a multi-byte UTF-8 sequence. The response SHALL be up to `READ_MAX_CHARS` characters starting at `offset`. `offset < 0` SHALL be clamped to `0` rather than erroring (FR-COM-2). An `offset` at or beyond the content's length SHALL return an empty string, signaling "nothing more to read," not an error. | Must | Implemented |
 
 **Non-Functional**
 
@@ -453,7 +455,7 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 | `IDX` | FR-IDX-1, FR-IDX-2, FR-IDX-3, FR-IDX-4, FR-IDX-5 (as of v1.4) | *(none)* |
 | `OVW` | FR-OVW-1, FR-OVW-2 (exact format, as of v1.4), FR-OVW-3, FR-OVW-4, NFR-OVW-2 (as of v1.4) | NFR-OVW-1, NFR-OVW-3 (calling-convention/freshness properties, not unit-testable in isolation) |
 | `SRCH` | FR-SRCH-1, FR-SRCH-4, FR-SRCH-5, NFR-SRCH-2 (as of v1.4) | FR-SRCH-2 (exact 10-row limit), FR-SRCH-3 (exact snippet shape) — no test indexes >10 matching notes to exercise the cap; NFR-SRCH-3 (a product-policy statement, not something a unit test asserts) |
-| `READ` | FR-READ-1, FR-READ-2, FR-READ-3, FR-READ-4 (as of v1.4), NFR-READ-1 (as of v1.4) | NFR-READ-2, NFR-READ-3 (rationale/freshness statements, not independently testable beyond FR-READ-4's own test) |
+| `READ` | FR-READ-1, FR-READ-2, FR-READ-3, FR-READ-4 (as of v1.4), FR-READ-5 (as of v1.5), NFR-READ-1 (as of v1.4) | NFR-READ-2, NFR-READ-3 (rationale/freshness statements, not independently testable beyond FR-READ-4/5's own tests) |
 | `NOTE` | FR-NOTE-1..5, NFR-NOTE-2, NFR-NOTE-4 (all as of v1.4) | NFR-NOTE-1 (async push-sync handoff timing — would need a push-sync test double), NFR-NOTE-3 (K8s manifest responsibility, not unit-testable) |
 | `PROP` | FR-PROP-1, FR-PROP-2, FR-PROP-3, FR-PROP-4, FR-PROP-6, FR-PROP-7, FR-PROP-8, NFR-PROP-2, NFR-PROP-3, NFR-PROP-8, NFR-PROP-9, NFR-PROP-10 (as of v1.4) | NFR-PROP-1, NFR-PROP-4, NFR-PROP-5, NFR-PROP-6, NFR-PROP-7 (process/architecture properties, not unit-testable in isolation) |
 | `AUTH` | FR-AUTH-1..6, NFR-AUTH-5, NFR-AUTH-6 (all as of v1.4, `tests/test_auth.py`) | NFR-AUTH-1, NFR-AUTH-2, NFR-AUTH-3, NFR-AUTH-4, NFR-AUTH-7 (deployment/protocol/architecture facts, not unit-testable against this codebase alone) |

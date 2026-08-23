@@ -1,3 +1,4 @@
+import asyncio
 import sqlite3
 
 import server
@@ -602,3 +603,15 @@ def test_propose_edit_increments_counter(tmp_path, monkeypatch):
     before = _value(server.PROPOSE_COUNTER)
     server.propose_edit([{"path": "note.md", "old": "old", "new": "new"}], "r")
     assert _value(server.PROPOSE_COUNTER) == before + 1
+
+
+# ── common (COM) ─────────────────────────────────────────────────────────────
+
+# BRD: NFR-COM-1
+def test_exactly_five_tools_registered():
+    # The 5-tool cap is this project's core value proposition (BRD.md §2, G3) —
+    # was previously marked "not unit-testable" in the RTM; it demonstrably is.
+    tools = asyncio.run(server.mcp.list_tools())
+    assert {t.name for t in tools} == {
+        "get_overview", "search", "read_note", "note", "propose_edit",
+    }

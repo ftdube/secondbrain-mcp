@@ -5,8 +5,8 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.9 (Draft) |
-| System / API version documented | 1.2.0 |
+| Document version | 1.11 (Draft) |
+| System / API version documented | 1.3.1 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
 | Classification | Public (repository is open-source; see §6 for redaction policy) |
@@ -26,6 +26,8 @@
 | 1.7 | 2026-08-23 | Implemented §9.10 (BLK). System version → 1.2.0. |
 | 1.8 | 2026-08-23 | Fixed RISK-9/OI-20 (blacklist leading-slash bug + branch coverage). |
 | 1.9 | 2026-08-23 | Restructure: extracted risk register to `RISKS.md` (was §14); folded RTM (was §16) into a §9.1 traceability requirement; moved Open Issues (was §17) to GitHub Issues. Added the hard rule this revision itself follows — this document states requirements, not a session-by-session log. Full detail for every prior revision lives in git history and PR descriptions, not here. |
+| 1.10 | 2026-08-23 | From real-world usage review: added FR-COM-5 (unambiguous `note`-vs-`propose_edit` boundary); reworked FR-PROP-1/2/6 and added FR-PROP-9 to let `propose_edit` create new files atomically within a diff instead of failing; amended FR-PROP-4 to add an informational `Drafted:` timestamp header. Implemented and regression-tested; system version → 1.3.0. |
+| 1.11 | 2026-08-23 | Gap audit on the v1.10 work. Found and fixed a real corruption bug: added NFR-PROP-11 — a create-target drifted (independently created) between drafting and applying was silently 3-way-merged with `<<<<<<<` conflict markers written to disk while `check()` reported clean, because a create's `/dev/null` base doesn't need the historical-blob lookup that NFR-PROP-9's dummy hash blocks for edits; fixed in `apply_proposals.py` with an explicit existence pre-check. Also closed traceability gaps: tagged two untagged-but-already-covered tests (FR-NOTE-4, NFR-NOTE-4) and added NFR-COM-4/NFR-SRCH-1/NFR-SRCH-5/NFR-SEC-1..6 to the §9.1 excused list as pre-existing architectural facts. System version → 1.3.1 (bug fix, no tool contract change). |
 
 Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 
@@ -174,7 +176,7 @@ Each requirement has a stable ID of the form `FR-<AREA>-<n>` or `NFR-<AREA>-<n>`
 
 **Traceability requirement.** Every requirement in this section SHALL be traceable to either an inline `# BRD: <ID>[, <ID>...]` comment directly above a `test_*` function in `tests/test_server.py`/`tests/test_apply_proposals.py`/`tests/test_auth.py`, or an explicit note in this document for why it is not independently unit-testable (e.g. an architectural or deployment fact). Run `grep -rn "# BRD:" tests/test_*.py` for the current, authoritative mapping — this is deliberately not duplicated as a table in this document (a hand-maintained copy tried in document v1.0–v1.8 drifted from the actual suite the moment either changed, silently, and added nothing a live `grep` doesn't already answer). A requirement found untraceable and not yet excused becomes a [GitHub Issue](https://github.com/ftdube/secondbrain-mcp/issues), not a row in a BRD table.
 
-As of document v1.9, the following are excused from that requirement as inherent architectural, deployment, or process facts rather than unit-testable behavior — asserting "runs on Kubernetes" or "delegates identity to Dex" isn't something a unit test proves: `NFR-COM-2`, `NFR-COM-3`, `NFR-COM-5`, `NFR-OVW-1`, `NFR-OVW-3`, `NFR-SRCH-3`, `NFR-READ-2`, `NFR-READ-3`, `NFR-NOTE-1`, `NFR-NOTE-3`, `NFR-PROP-1`, `NFR-PROP-4`, `NFR-PROP-5`, `NFR-PROP-6`, `NFR-PROP-7`, `NFR-AUTH-1`, `NFR-AUTH-3`, `NFR-AUTH-4`, `NFR-AUTH-7`, `NFR-BLK-1`, `NFR-BLK-2`, `NFR-BLK-3`. This list exists so a future audit doesn't spend time re-deriving which NFRs fall in this bucket, or re-flagging one as a gap (two prior audits, in document v1.1 and v1.6, each spent real effort re-examining this exact question) — remove an ID from it only when it becomes independently testable, not on a recurring review cadence.
+As of document v1.11, the following are excused from that requirement as inherent architectural, deployment, or process facts rather than unit-testable behavior — asserting "runs on Kubernetes" or "delegates identity to Dex" isn't something a unit test proves: `NFR-COM-2`, `NFR-COM-3`, `NFR-COM-4` (umbrella statement instantiated, and independently tested, per tool as NFR-OVW-2/NFR-SRCH-2/NFR-READ-1/NFR-NOTE-2/NFR-PROP-10), `NFR-COM-5`, `NFR-OVW-1`, `NFR-OVW-3`, `NFR-SRCH-1` (no-network-call design fact), `NFR-SRCH-3`, `NFR-SRCH-5` (pure cross-reference to NFR-COM-5, same pattern as the already-excused NFR-READ-3), `NFR-READ-2`, `NFR-READ-3`, `NFR-NOTE-1`, `NFR-NOTE-3`, `NFR-PROP-1`, `NFR-PROP-4`, `NFR-PROP-5`, `NFR-PROP-6`, `NFR-PROP-7`, `NFR-AUTH-1`, `NFR-AUTH-3`, `NFR-AUTH-4`, `NFR-AUTH-7`, `NFR-BLK-1`, `NFR-BLK-2`, `NFR-BLK-3`, `NFR-SEC-1`..`NFR-SEC-6` (repo-hygiene/deployment/CI-pipeline facts, or pure cross-references to other requirements). This list exists so a future audit doesn't spend time re-deriving which NFRs fall in this bucket, or re-flagging one as a gap (three prior audits, in document v1.1, v1.6, and v1.11, each spent real effort re-examining this exact question) — remove an ID from it only when it becomes independently testable, not on a recurring review cadence.
 
 ### 9.2 Common / Cross-Tool Requirements (`COM`)
 
@@ -186,6 +188,7 @@ As of document v1.9, the following are excused from that requirement as inherent
 | FR-COM-2 | Every tool SHALL return a plain UTF-8 string for both success and failure outcomes; no tool SHALL raise an unhandled exception to the MCP client. | Must | Implemented |
 | FR-COM-3 | Write-path tools (`note`, `propose_edit`) SHALL write only to `OUTBOX_PATH`. No tool SHALL write to `VAULT_PATH` or invoke `git`. | Must | Implemented |
 | FR-COM-4 | The effective vault root SHALL be `VAULT_PATH/vault` when that path exists, else `VAULT_PATH` itself. | Must | Implemented |
+| FR-COM-5 (new, document v1.10) | `note` and `propose_edit` SHALL have mutually exclusive, unambiguous purposes stated in their tool descriptions, so the calling model has a single deciding test rather than a judgment call. **`note`** is for content not yet bound to a specific vault location — a capture, observation, or draft a human will triage and file later; the caller does not need to know, or commit to, where it belongs. **`propose_edit`** is for a deliberate, structured change to the vault's existing organization — edits to specific, already-identified note(s), and/or new note(s) at specific paths following the vault's existing conventions (FR-PROP-6) — expressed as a precise, reviewable diff. The test: if the caller can name the exact target path(s) and write the precise content without guessing, use `propose_edit`; if not, use `note`. | Must | Implemented — both tool docstrings state the boundary; see FR-PROP-6/9 for the mechanism that makes `propose_edit` capable of the "new note at a specific path" half of this test |
 
 **Non-Functional**
 
@@ -260,6 +263,8 @@ As of document v1.9, the following are excused from that requirement as inherent
 
 ### 9.6 `note(title, content)` (`NOTE`)
 
+Scope boundary with `propose_edit`: see FR-COM-5.
+
 **Functional**
 
 | ID | Requirement | Priority | Status |
@@ -281,20 +286,21 @@ As of document v1.9, the following are excused from that requirement as inherent
 
 ### 9.7 `propose_edit(edits, rationale)` (`PROP`)
 
-This is the most recently added, and most heavily specified, tool. Its requirements originate from a dedicated design note (F1–F8 functional, N1–N7 non-functional) drafted before implementation began; N8 and N9 were added *during* implementation after two real correctness defects were found and fixed. Original IDs are shown in parentheses.
+This is the most recently added, and most heavily specified, tool. Its requirements originate from a dedicated design note (F1–F8 functional, N1–N7 non-functional) drafted before implementation began; N8 and N9 were added *during* implementation after two real correctness defects were found and fixed. Original IDs are shown in parentheses. Scope boundary with `note`: see FR-COM-5.
 
 **Functional**
 
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
-| FR-PROP-1 (F1) | Signature SHALL be `propose_edit(edits: list[{path, old, new}], rationale: str)`. Edits sharing a `path` SHALL apply to that note in the given order. | Must | Implemented |
-| FR-PROP-2 (F2) | For each edit, `old` SHALL match the note's *current* content exactly once; zero or multiple matches SHALL fail the entire proposal (see FR-PROP-8) rather than apply ambiguously. | Must | Implemented |
+| FR-PROP-1 (F1) | Signature SHALL be `propose_edit(edits: list[{path, old, new}], rationale: str)`, where `old` is optional (defaults to `""`). Edits sharing a `path` SHALL apply to that note in the given order, with the first edit's starting content being the file's real current content if it exists, else `""` (see FR-PROP-6). | Must | Implemented; regression-tested |
+| FR-PROP-2 (F2) | For each edit, `old` SHALL match the note's *current* content exactly once; zero or multiple matches SHALL fail the entire proposal (see FR-PROP-8) rather than apply ambiguously. (For a newly-created path per FR-PROP-6, current content starts as `""`, against which an omitted/empty `old` trivially matches once — no special-casing needed, this is the same rule.) | Must | Implemented |
 | FR-PROP-3 (F3) | The tool SHALL emit one git-format unified diff per changed file (`diff --git`, `index` line, unified hunks), concatenated into one artifact when more than one file changed. | Must | Implemented |
-| FR-PROP-4 (F4) | The artifact SHALL be written to `OUTBOX_PATH` as `<slug>-<digest>.patch.md` (rationale header + fenced ` ```diff ` block); push-sync SHALL route `*.patch.md` to `PROPOSALS_DIR` (default `Proposals/`) instead of `NOTE_INBOX`. | Must | Implemented |
+| FR-PROP-4 (F4) | The artifact SHALL be written to `OUTBOX_PATH` as `<slug>-<digest>.patch.md` (a header containing `Drafted: {UTC timestamp}` and the rationale, followed by a fenced ` ```diff ` block); push-sync SHALL route `*.patch.md` to `PROPOSALS_DIR` (default `Proposals/`) instead of `NOTE_INBOX`. The timestamp is informational only (lets a human reviewer see how stale a pending proposal is) — it is never read back or used for staleness detection; drift detection is entirely `git apply --3way`'s content-matching (NFR-PROP-3). | Must | Implemented; regression-tested |
 | FR-PROP-5 (F5) | Review/apply SHALL happen out of band via `make proposals` (dry-run) and `make apply-proposals` (real apply), both wrapping `scripts/apply_proposals.py`. | Must | Implemented |
-| FR-PROP-6 (F6) | If any target path does not already exist, the tool SHALL fail with a message directing the caller to `note`, never silently creating the file. | Must | Implemented |
+| FR-PROP-6 (F6) | If a target path does not exist, the tool SHALL create it, but only if that path's first edit omits `old` (or passes `old=""`); the file's starting content is treated as `""` for FR-PROP-2's matching. If the first edit for a nonexistent path supplies a non-empty `old`, the tool SHALL fail loudly (content that specific can't legitimately match a file that isn't there) rather than silently doing nothing. Creation is still subject to FR-COM-1 (traversal/symlink-safe resolution) and the blacklist (NFR-BLK-3) like any other target path. | Must | Implemented; regression-tested (supersedes the v1.9 behavior of unconditionally failing and directing the caller to `note`; see FR-COM-5 for the now-explicit `note`-vs-`propose_edit` boundary that replaces that blanket redirect) |
 | FR-PROP-7 (F7) | The artifact filename SHALL be a deterministic hash of `(changed relative paths, resulting content)`; a byte-identical repeat call SHALL return `"Already proposed (unchanged): {filename}"` instead of duplicating. | Must | Implemented |
-| FR-PROP-8 (F8) | Edits spanning multiple paths in one call SHALL be reviewed and applied as one coherent, atomic unit — every changed file is written, or none are. | Must | **Implemented in this revision** |
+| FR-PROP-8 (F8) | Edits spanning multiple paths in one call SHALL be reviewed and applied as one coherent, atomic unit — every changed or newly-created file is written, or none are. | Must | Implemented; regression-tested |
+| FR-PROP-9 (new, document v1.10) | For a newly-created path (FR-PROP-6), the emitted diff SHALL use git's standard new-file headers — `new file mode 100644`, `--- /dev/null`, `+++ b/<path>` — rather than the two-sided header FR-PROP-3 describes for edits to existing files, so `git apply --3way` treats it as a creation rather than attempting to match context against a file that doesn't exist. | Must | Implemented; verified `git apply --3way --check`/apply accept this header format for a fresh file (empirical scratch-repo test) |
 
 **Non-Functional**
 
@@ -310,6 +316,7 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | NFR-PROP-8 (N8, new) | Multi-file atomicity (FR-PROP-8) SHALL be enforced at the application level: `apply_proposals.py` SHALL always run a full-patch dry-run `check()` before `apply_one()`, and skip the real apply entirely on any check failure. `git apply` itself does **not** guarantee cross-file atomicity within one patch — verified: a bare `git apply --3way` on a patch with one drifted file among several mutates the earlier, non-drifted files before failing on the later one. | Must | Implemented; regression-tested |
 | NFR-PROP-9 (N9, new) | The diff's `index` line SHALL use a dummy `0000000..0000000` blob pair, never a real git blob hash. A real hash lets `git apply --3way` locate the historical blob and attempt a genuine content merge on drift — verified this silently writes `<<<<<<<` conflict markers into the note while `--check` reports success (false-clean). The dummy hash forces plain context matching, trading 3-way merge resilience for safety. | Must | Implemented; regression-tested |
 | NFR-PROP-10 (new) | Each call SHALL increment a dedicated Prometheus counter `mcp_propose_edits_total`, consistent with every other tool's NFR-COM-4 instance (NFR-OVW-2, NFR-SRCH-2, NFR-READ-1, NFR-NOTE-2). This requirement was missing from document v1.0/v1.1 despite the counter already existing in code since `propose_edit` was first built — added here to close that documentation gap, not to change behavior. | Must | Implemented (counter has existed since v1.1; test coverage added in v1.4) |
+| NFR-PROP-11 (new, document v1.11) | For a create (FR-PROP-6/FR-PROP-9), `apply_proposals.py` SHALL reject a create-target that already exists on disk as drift, before the patch is ever handed to `git`. NFR-PROP-9's dummy-hash protection does **not** by itself extend to creates: a create's base is declared directly as `/dev/null` in the diff text rather than resolved via the index line's blob hash, so `git apply --3way` can always reconstruct an empty base and perform a genuine 3-way merge regardless of the dummy hash. Found in the post-implementation gap audit: without this guard, applying a proposal against an independently-created target silently wrote `<<<<<<<` conflict markers into the file on disk while `check()` reported it clean — the exact false-clean failure mode NFR-PROP-9 exists to prevent, now reopened for creates specifically. Verified against a real git repo before and after the fix. | Must | Implemented; regression-tested (`test_check_stale_when_create_target_already_exists`, `test_drifted_create_apply_never_writes_conflict_markers`) |
 
 ### 9.8 Authentication (`AUTH`)
 

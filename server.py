@@ -6,7 +6,7 @@ Five tools:
   search(query)                — FTS5 keyword search, top 10 excerpts
   read_note(path, offset=0)     — note by vault-relative path, paginated past ~20,000 chars
   note(title, content)          — save a draft note to the vault inbox
-  propose_edit(edits, rationale) — draft a reviewable diff against one or more existing notes, atomically
+  propose_edit(edits, rationale) — draft a reviewable diff against one or more notes (existing or new), atomically
 
 Auth: Bearer JWT issued by Dex (OAuth 2.1 / PKCE).
 Index: SQLite FTS5 with porter stemmer, rebuilt on startup and POST /reindex.
@@ -249,7 +249,7 @@ def _note_filename(title: str) -> str:
 
 @mcp.tool()
 def note(title: str, content: str) -> str:
-    """Save a note to the vault inbox for later review. Claude drafts the content; you review and file it in Obsidian at your leisure."""
+    """Save a note to the vault inbox for later review. Use when you don't know, or don't need to commit to, the exact destination — content will be triaged and filed later. For a precise, structured change at a known path, use `propose_edit` instead."""
     NOTE_COUNTER.inc()
     OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
     filename = _note_filename(title)
@@ -264,7 +264,7 @@ def note(title: str, content: str) -> str:
 PROPOSE_COUNTER = Counter("mcp_propose_edits_total", "Total propose_edit tool calls")
 
 
-def _make_diff(rel_path: str, old: str, new: str) -> str:
+def _make_diff(rel_path: str, old: str, new: str, is_new: bool = False) -> str:
     # index line uses a dummy 0000000 blob pair, not a real git hash-object id.
     # A real id would let `git apply --3way` locate the historical blob and
     # attempt a genuine content merge — which can silently succeed with
@@ -274,11 +274,13 @@ def _make_diff(rel_path: str, old: str, new: str) -> str:
     hunk = "".join(difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),
-        fromfile=f"a/{rel_path}",
+        fromfile="/dev/null" if is_new else f"a/{rel_path}",
         tofile=f"b/{rel_path}",
     ))
+    mode_line = "new file mode 100644\n" if is_new else ""
     return (
         f"diff --git a/{rel_path} b/{rel_path}\n"
+        f"{mode_line}"
         f"index 0000000..0000000 100644\n"
         f"{hunk}"
     )
@@ -286,7 +288,7 @@ def _make_diff(rel_path: str, old: str, new: str) -> str:
 
 @mcp.tool()
 def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
-    """Propose find/replace edits to one or more existing vault notes as a single reviewable diff. Each edit is {path, old, new}; edits sharing a path apply in order. Multiple paths in one call become one atomic proposal — applied all together or not at all. Never writes to the vault — for new notes use `note` instead."""
+    """Propose find/replace edits to one or more vault notes, existing or new, as a single reviewable diff. Each edit is {path, old, new}; old is optional (defaults to ""). To create a new note, the first edit for that path must omit old. Edits sharing a path apply in order. Multiple paths in one call become one atomic proposal — applied all together or not at all. Never writes to the vault directly. Use only when you can name the exact target path(s) and write precise content without guessing — otherwise use `note`."""
     PROPOSE_COUNTER.inc()
     if not edits:
         return "No edits provided."
@@ -296,30 +298,33 @@ def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
         if edit["path"] not in paths:
             paths.append(edit["path"])
 
-    # path -> (rel_path, original, edited content)
-    results: dict[str, tuple[str, str, str]] = {}
+    # path -> (rel_path, original, edited content, is_new)
+    results: dict[str, tuple[str, str, str, bool]] = {}
     for path in paths:
         p = _resolve_in_vault(path)
         if p is None:
             return f"Access denied: {path}"
-        if not p.exists():
-            return f"No such note: {path}. Use the note tool to create new notes — propose_edit only edits existing ones."
+
+        is_new = not p.exists()
+        path_edits = [edit for edit in edits if edit["path"] == path]
+        if is_new and path_edits[0].get("old", ""):
+            return f"No such note: {path}. To create it, the first edit for this path must omit `old` (or pass old=\"\")."
 
         rel_path = p.relative_to(_effective_vault().resolve()).as_posix()
-        content = original = p.read_text()
+        content = original = "" if is_new else p.read_text()
         i = 0
         for edit in edits:
             if edit["path"] != path:
                 continue
             i += 1
-            old, new = edit["old"], edit["new"]
+            old, new = edit.get("old", ""), edit["new"]
             count = content.count(old)
             if count == 0:
                 return f"Edit {i} for {path} failed: anchor not found."
             if count > 1:
                 return f"Edit {i} for {path} failed: anchor matches {count} times, must match exactly once."
             content = content.replace(old, new, 1)
-        results[path] = (rel_path, original, content)
+        results[path] = (rel_path, original, content, is_new)
 
     changed_paths = [path for path in paths if results[path][1] != results[path][2]]
     if not changed_paths:
@@ -327,8 +332,8 @@ def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
 
     diff_parts, digest_parts, rel_paths = [], [], []
     for path in changed_paths:
-        rel_path, original, content = results[path]
-        diff_parts.append(_make_diff(rel_path, original, content))
+        rel_path, original, content, is_new = results[path]
+        diff_parts.append(_make_diff(rel_path, original, content, is_new=is_new))
         digest_parts.append(rel_path + content)
         rel_paths.append(rel_path)
     diff = "".join(diff_parts)
@@ -344,7 +349,8 @@ def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
     if dest.exists():
         return f"Already proposed (unchanged): {filename}"
     header = ", ".join(rel_paths)
-    dest.write_text(f"# Proposed edit: {header}\n\n{rationale}\n\n```diff\n{diff}```\n")
+    drafted = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    dest.write_text(f"# Proposed edit: {header}\n\nDrafted: {drafted}\n\n{rationale}\n\n```diff\n{diff}```\n")
     return f"Proposed: {filename}"
 
 

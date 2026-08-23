@@ -33,11 +33,11 @@ Five tools:
 | `search(query)` | Top 10 FTS5 excerpts (path + heading + ~200 chars) |
 | `read_note(path, offset=0)` | Note by vault-relative path; paginated past ~20,000 chars |
 | `note(title, content)` | Saves a draft note to `Inbox/` for later review in Obsidian |
-| `propose_edit(edits, rationale)` | Drafts a reviewable diff against one or more *existing* notes, saved to `Proposals/` — never writes the vault directly |
+| `propose_edit(edits, rationale)` | Drafts a reviewable diff against one or more notes, existing or new, saved to `Proposals/` — never writes the vault directly |
 
-### Proposing edits to existing notes
+### Proposing edits to notes, and creating new ones at a known path
 
-`note` only creates new Inbox seeds — editing a structured note from Claude.ai (desktop or mobile) was previously off-limits on conflict/correctness grounds. `propose_edit` closes that gap safely: `edits` is an ordered list of `{path, old, new}` find/replace triples, applied in-process against the vault mirror (each anchor must match exactly once per note), and written as a single git-format diff — a `Proposals/*.patch.md` artifact — never mutating the vault or invoking git itself. Edits across multiple paths in one call become one atomic proposal: `scripts/apply_proposals.py` only applies it if *every* file in the patch checks clean, so it's all-or-nothing, never partially applied.
+`note` is for content not yet bound to a specific location — a capture or draft a human will triage and file later. `propose_edit` is for a deliberate, structured change at a specific, already-known path: `edits` is an ordered list of `{path, old, new}` find/replace triples (`old` optional — omit it on the first edit for a path to create that note), applied in-process against the vault mirror (each anchor must match exactly once per note), and written as a single git-format diff — a `Proposals/*.patch.md` artifact — never mutating the vault or invoking git itself. Edits across multiple paths in one call become one atomic proposal: `scripts/apply_proposals.py` only applies it if *every* file in the patch checks clean, so it's all-or-nothing, never partially applied.
 
 Proposals are applied out of band, model-free:
 

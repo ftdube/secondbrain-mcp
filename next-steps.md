@@ -20,7 +20,7 @@ Grafana PromQL: `rate(mcp_search_misses_total[7d]) / rate(mcp_searches_total[7d]
 
 Add `sqlite-vec`, ONNX `all-MiniLM-L6-v2`, RRF merge, wikilink adjacency table.
 
-## propose_edit tool — ✅ implemented on `feature/propose-edit`, pending merge + real-world validation
+## propose_edit tool — ✅ implemented and merged, real-world validated
 
 5th MCP tool, gated behind human review: drafts a find/replace edit against a note in the read-only vault mirror, emits a git-format diff (no git in server — pure function of current content + edits), and routes it through the existing outbox→push-sync transport into a `Proposals/` queue instead of `Inbox/`. Applied out of band via `scripts/apply_proposals.py` (`git apply --3way`), never by a model in the loop.
 
@@ -32,7 +32,9 @@ Built: `server.py` (`propose_edit`, `_make_diff`), `sidecars/push-sync.sh` + `co
 
 **Second correctness fix found while building F8:** `git apply` is NOT atomic across files within one patch — verified a bare `git apply` on a patch with one drifted file among several still mutates the earlier, non-drifted files before failing on the later one. Atomicity for F8 depends entirely on `apply_proposals.main()` always calling `check()` (a full-patch dry run) before `apply_one()` and skipping the apply outright if check fails — never on git's own guarantees. Documented as a hard invariant in `agents.md` and regression-tested in `test_apply_proposals.py::test_multi_file_patch_atomic_when_one_file_drifted`.
 
-**Not yet done:** real end-to-end validation (V2/V3/V5 from the original vault design note) — a live Claude Code session actually running `make apply-proposals` rather than hand-applying, and a real idempotency check against a live push-sync sidecar. Trigger: before relying on this for real vault edits, run through Planned use steps 1-4 once against a scratch vault clone.
+**Real end-to-end validation — done.** Ran the actual pipeline (not just unit tests) against real proposals from the live vault: `apply_proposals.py` correctly checked and applied real `Proposals/*.patch.md` content. Confirmed the patch format is a genuine, directly-appliable git diff.
+
+**Third correctness fix, found in a follow-up gap audit after adding file-creation (FR-PROP-6/9):** for a *create* diff, the base is declared directly as `/dev/null` in the diff text, not looked up via the index line's blob hash — so the dummy-hash trick above does not protect a create the way it protects an edit. `git apply --3way` could always reconstruct an empty base for it and would silently 3-way-merge a drifted create-target, writing `<<<<<<<` conflict markers into the file while `check()` still reported clean. Fixed in `apply_proposals.py` with an explicit pre-check that rejects a create whose target already exists on disk, before git ever sees the patch. Regression-tested in `test_apply_proposals.py::test_drifted_create_apply_never_writes_conflict_markers`.
 
 Note: the original "saves quota by shifting work to Claude.ai" rationale is retracted — Claude Code, Claude.ai, and Cowork share one subscription usage pool, so a draft-then-integrate split with a model on both ends burns *more* tokens, not less. The actual justification is the human-review gate on AI edits to load-bearing notes, plus mobile-first drafting.
 

@@ -53,3 +53,12 @@ Full original requirements (F1-F8, N1-N7) and validation plan (V1-V7) in vault `
 Trigger: CI publishing two unrelated images from one repo is messy.
 Move `sidecars/` to a standalone `push-sync` repo with its own CI. Reference it from here as an external dependency in the README and compose.yaml.
 
+## Security/observability gaps ported from `vault-publisher`'s BRD
+
+Found via a comparative gap audit (document v1.12); full detail in `BRD.md` §9.11/§12 (NFR-SEC-7, FR-OBS-1, NFR-OBS-1/2) and `RISKS.md` RISK-11..14.
+
+- ~~**git-sync/push-sync key separation** (issue #58)~~ — **Resolved** in PR #62.
+- **`/health` readiness signal** (issue #59) — trigger: next time `server.py`'s startup/indexing path is touched.
+- **Reindex staleness gauge** (issue #60) — trigger: next time a new Prometheus metric is added anyway (bundle it in).
+- **Formal RAM bound + K8s resource limits** (issue #61) — trigger: once this service's own K8s manifests exist in-repo (they don't yet — `compose.yaml` is the only deployment config currently checked in).
+

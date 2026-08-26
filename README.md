@@ -135,6 +135,12 @@ The `git-sync` sidecar polls the vault git repo every 5 minutes. The server dete
 
 Both sidecars share `GIT_REPO_URL` and `GIT_BRANCH` (default: `main`). `push-sync` uses the SSH key at `/ssh/id_ed25519` (configured via `SSH_KEY_PATH` in `.env`), while `git-sync` uses a separate read-only key (configured via `GITSYNC_SSH_KEY_PATH` in `.env`). See `compose.yaml` for the full configuration — it is the authoritative reference for sidecar env vars.
 
+**Generating the read-only key for git-sync:**
+To enforce the least-privilege security model, `git-sync` requires its own SSH key that is restricted to read-only access on your Git host:
+1. Generate the key: `ssh-keygen -t ed25519 -f ~/.ssh/git_sync_ed25519 -N ""`
+2. Add the public key (`~/.ssh/git_sync_ed25519.pub`) to your Git host (GitHub, GitLab, etc.) as a **Read-Only** Deploy Key. Do not grant write access.
+3. Add `GITSYNC_SSH_KEY_PATH=~/.ssh/git_sync_ed25519` to your `.env` file.
+
 For local dev without a git repo, run only `docker compose up mcp`.
 
 ## Auth

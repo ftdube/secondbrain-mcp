@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.12 (Draft) |
+| Document version | 1.13 (Draft) |
 | System / API version documented | 1.3.1 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
@@ -29,6 +29,7 @@
 | 1.10 | 2026-08-23 | From real-world usage review: added FR-COM-5 (unambiguous `note`-vs-`propose_edit` boundary); reworked FR-PROP-1/2/6 and added FR-PROP-9 to let `propose_edit` create new files atomically within a diff instead of failing; amended FR-PROP-4 to add an informational `Drafted:` timestamp header. Implemented and regression-tested; system version → 1.3.0. |
 | 1.11 | 2026-08-23 | Gap audit on the v1.10 work. Found and fixed a real corruption bug: added NFR-PROP-11 — a create-target drifted (independently created) between drafting and applying was silently 3-way-merged with `<<<<<<<` conflict markers written to disk while `check()` reported clean, because a create's `/dev/null` base doesn't need the historical-blob lookup that NFR-PROP-9's dummy hash blocks for edits; fixed in `apply_proposals.py` with an explicit existence pre-check. Also closed traceability gaps: tagged two untagged-but-already-covered tests (FR-NOTE-4, NFR-NOTE-4) and added NFR-COM-4/NFR-SRCH-1/NFR-SRCH-5/NFR-SEC-1..6 to the §9.1 excused list as pre-existing architectural facts. System version → 1.3.1 (bug fix, no tool contract change). |
 | 1.12 | 2026-08-25 | Comparative gap audit against the sibling `vault-publisher` repo's BRD (same operator, same self-hosted cluster), requested to check for portable security/monitoring/uptime requirements. Added new §9.11 (OBS): FR-OBS-1 (`/health` readiness signal) and NFR-OBS-1 (reindex-staleness gauge), both Not implemented, tracked as [issue #59](https://github.com/ftdube/secondbrain-mcp/issues/59)/[#60](https://github.com/ftdube/secondbrain-mcp/issues/60); NFR-OBS-2 (RAM bound, Could) tracked as [issue #61](https://github.com/ftdube/secondbrain-mcp/issues/61). Added NFR-SEC-7 (§12) — `git-sync` currently shares `push-sync`'s read-write SSH key (`compose.yaml`, documented in `README.md`), giving the read-only sidecar unnecessary write credentials; Not implemented, tracked as [issue #58](https://github.com/ftdube/secondbrain-mcp/issues/58) and `RISKS.md` RISK-11. No system-version bump — documentation and backlog only, no code changed. |
+| 1.13 | 2026-08-26 | Implemented NFR-SEC-7 (issue #58): `git-sync` now uses a separate read-only SSH key via `GITSYNC_SSH_KEY_PATH`. Updated `README.md` with key generation instructions. |
 
 Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 

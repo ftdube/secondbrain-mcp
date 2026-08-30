@@ -158,58 +158,64 @@ def _resolve_in_vault(path: str) -> Path | None:
 @mcp.tool()
 def get_overview() -> str:
     """Return context.md and _map.md to orient Claude at session start."""
-    OVERVIEW_COUNTER.inc()
-    effective = _effective_vault()
-    parts = []
-    for name in ("context.md", "_map.md"):
-        p = effective / name
-        if p.exists():
-            parts.append(f"## {name}\n\n{p.read_text()}")
-    result = "\n\n---\n\n".join(parts) or "Vault unavailable."
-    OVERVIEW_CHARS.inc(len(result))
-    return result
+    try:
+        OVERVIEW_COUNTER.inc()
+        effective = _effective_vault()
+        parts = []
+        for name in ("context.md", "_map.md"):
+            p = effective / name
+            if p.exists():
+                parts.append(f"## {name}\n\n{p.read_text()}")
+        result = "\n\n---\n\n".join(parts) or "Vault unavailable."
+        OVERVIEW_CHARS.inc(len(result))
+        return result
+    except Exception as e:
+        return f"Error: {e}"
 
 
 @mcp.tool()
 def search(query: str) -> str:
     """Search the vault. Returns up to 10 excerpts (path, heading, 200-char snippet)."""
-    SEARCH_COUNTER.inc()
-    conn = sqlite3.connect(DB_PATH)
     try:
-        rows = conn.execute(
-            """
-            SELECT path,
-                   heading,
-                   snippet(chunks_fts, 2, '', '', '…', 30) AS excerpt
-            FROM   chunks_fts
-            WHERE  chunks_fts MATCH ?
-            ORDER  BY rank
-            LIMIT  10
-            """,
-            (query,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        # FTS5 syntax error — retry as a quoted phrase
-        rows = conn.execute(
-            """
-            SELECT path,
-                   heading,
-                   snippet(chunks_fts, 2, '', '', '…', 30) AS excerpt
-            FROM   chunks_fts
-            WHERE  chunks_fts MATCH ?
-            ORDER  BY rank
-            LIMIT  10
-            """,
-            (f'"{query}"',),
-        ).fetchall()
-    finally:
-        conn.close()
-    if not rows:
-        SEARCH_MISSES.inc()
-        return "No results."
-    result = "\n\n".join(f"**{r[0]}** — {r[1]}\n{r[2]}" for r in rows)
-    SEARCH_CHARS.inc(len(result))
-    return result
+        SEARCH_COUNTER.inc()
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            rows = conn.execute(
+                """
+                SELECT path,
+                       heading,
+                       snippet(chunks_fts, 2, '', '', '…', 30) AS excerpt
+                FROM   chunks_fts
+                WHERE  chunks_fts MATCH ?
+                ORDER  BY rank
+                LIMIT  10
+                """,
+                (query,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # FTS5 syntax error — retry as a quoted phrase
+            rows = conn.execute(
+                """
+                SELECT path,
+                       heading,
+                       snippet(chunks_fts, 2, '', '', '…', 30) AS excerpt
+                FROM   chunks_fts
+                WHERE  chunks_fts MATCH ?
+                ORDER  BY rank
+                LIMIT  10
+                """,
+                (f'"{query}"',),
+            ).fetchall()
+        finally:
+            conn.close()
+        if not rows:
+            SEARCH_MISSES.inc()
+            return "No results."
+        result = "\n\n".join(f"**{r[0]}** — {r[1]}\n{r[2]}" for r in rows)
+        SEARCH_CHARS.inc(len(result))
+        return result
+    except Exception as e:
+        return f"Error: {e}"
 
 
 # NFR-READ-2 (BRD.md OI-2): caps a single response's token cost. Truncation is
@@ -220,25 +226,28 @@ READ_MAX_CHARS = 20_000
 @mcp.tool()
 def read_note(path: str, offset: int = 0) -> str:
     """Read a vault note by relative path (e.g. 'Homelab/Ocean/Summary.md'). Notes longer than ~20,000 characters are truncated; pass the offset from a truncated response's marker to continue reading."""
-    READ_COUNTER.inc()
-    p = _resolve_in_vault(path)
-    if p is None:
-        return f"Access denied: {path}"
-    if not p.exists():
-        return f"Not found: {path}"
-    content = p.read_text()
-    offset = max(0, offset)
-    chunk = content[offset : offset + READ_MAX_CHARS]
-    next_offset = offset + len(chunk)
-    if next_offset < len(content):
-        total_bytes = len(content.encode())
-        chunk += (
-            f"\n\n...(truncated, {total_bytes} bytes total"
-            f"; call read_note with offset={next_offset} to continue)"
-        )
-    result = chunk
-    READ_CHARS.inc(len(result))
-    return result
+    try:
+        READ_COUNTER.inc()
+        p = _resolve_in_vault(path)
+        if p is None:
+            return f"Access denied: {path}"
+        if not p.exists():
+            return f"Not found: {path}"
+        content = p.read_text()
+        offset = max(0, offset)
+        chunk = content[offset : offset + READ_MAX_CHARS]
+        next_offset = offset + len(chunk)
+        if next_offset < len(content):
+            total_bytes = len(content.encode())
+            chunk += (
+                f"\n\n...(truncated, {total_bytes} bytes total"
+                f"; call read_note with offset={next_offset} to continue)"
+            )
+        result = chunk
+        READ_CHARS.inc(len(result))
+        return result
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def _note_filename(title: str) -> str:
@@ -250,18 +259,18 @@ def _note_filename(title: str) -> str:
 @mcp.tool()
 def note(title: str, content: str) -> str:
     """Save a note to the vault inbox for later review. Use when you don't know, or don't need to commit to, the exact destination — content will be triaged and filed later. For a precise, structured change at a known path, use `propose_edit` instead."""
-    NOTE_COUNTER.inc()
-    OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
-    filename = _note_filename(title)
-    dest = OUTBOX_PATH / filename
-    if dest.exists():
-        filename = f"{filename[:-3]}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.md"
+    try:
+        NOTE_COUNTER.inc()
+        OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
+        filename = _note_filename(title)
         dest = OUTBOX_PATH / filename
-    dest.write_text(f"# {title}\n\n{content}\n")
-    return f"Saved to inbox: {filename}"
-
-
-PROPOSE_COUNTER = Counter("mcp_propose_edits_total", "Total propose_edit tool calls")
+        if dest.exists():
+            filename = f"{filename[:-3]}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.md"
+            dest = OUTBOX_PATH / filename
+        dest.write_text(f"# {title}\n\n{content}\n")
+        return f"Saved to inbox: {filename}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
 def _make_diff(rel_path: str, old: str, new: str, is_new: bool = False) -> str:
@@ -289,69 +298,72 @@ def _make_diff(rel_path: str, old: str, new: str, is_new: bool = False) -> str:
 @mcp.tool()
 def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
     """Propose find/replace edits to one or more vault notes, existing or new, as a single reviewable diff. Each edit is {path, old, new}; old is optional (defaults to ""). To create a new note, the first edit for that path must omit old. Edits sharing a path apply in order. Multiple paths in one call become one atomic proposal — applied all together or not at all. Never writes to the vault directly. Use only when you can name the exact target path(s) and write precise content without guessing — otherwise use `note`."""
-    PROPOSE_COUNTER.inc()
-    if not edits:
-        return "No edits provided."
+    try:
+        PROPOSE_COUNTER.inc()
+        if not edits:
+            return "No edits provided."
 
-    paths: list[str] = []
-    for edit in edits:
-        if edit["path"] not in paths:
-            paths.append(edit["path"])
-
-    # path -> (rel_path, original, edited content, is_new)
-    results: dict[str, tuple[str, str, str, bool]] = {}
-    for path in paths:
-        p = _resolve_in_vault(path)
-        if p is None:
-            return f"Access denied: {path}"
-
-        is_new = not p.exists()
-        path_edits = [edit for edit in edits if edit["path"] == path]
-        if is_new and path_edits[0].get("old", ""):
-            return f"No such note: {path}. To create it, the first edit for this path must omit `old` (or pass old=\"\")."
-
-        rel_path = p.relative_to(_effective_vault().resolve()).as_posix()
-        content = original = "" if is_new else p.read_text()
-        i = 0
+        paths: list[str] = []
         for edit in edits:
-            if edit["path"] != path:
-                continue
-            i += 1
-            old, new = edit.get("old", ""), edit["new"]
-            count = content.count(old)
-            if count == 0:
-                return f"Edit {i} for {path} failed: anchor not found."
-            if count > 1:
-                return f"Edit {i} for {path} failed: anchor matches {count} times, must match exactly once."
-            content = content.replace(old, new, 1)
-        results[path] = (rel_path, original, content, is_new)
+            if edit["path"] not in paths:
+                paths.append(edit["path"])
 
-    changed_paths = [path for path in paths if results[path][1] != results[path][2]]
-    if not changed_paths:
-        return "No changes: edits produce identical content for all paths."
+        # path -> (rel_path, original, edited content, is_new)
+        results: dict[str, tuple[str, str, str, bool]] = {}
+        for path in paths:
+            p = _resolve_in_vault(path)
+            if p is None:
+                return f"Access denied: {path}"
 
-    diff_parts, digest_parts, rel_paths = [], [], []
-    for path in changed_paths:
-        rel_path, original, content, is_new = results[path]
-        diff_parts.append(_make_diff(rel_path, original, content, is_new=is_new))
-        digest_parts.append(rel_path + content)
-        rel_paths.append(rel_path)
-    diff = "".join(diff_parts)
-    digest = hashlib.sha256("".join(digest_parts).encode()).hexdigest()[:8]
+            is_new = not p.exists()
+            path_edits = [edit for edit in edits if edit["path"] == path]
+            if is_new and path_edits[0].get("old", ""):
+                return f"No such note: {path}. To create it, the first edit for this path must omit `old` (or pass old=\"\")."
 
-    slug = re.sub(r"[^\w-]", "-", Path(rel_paths[0]).stem)
-    if len(rel_paths) > 1:
-        slug += "-multi"
-    filename = f"{slug}-{digest}.patch.md"
+            rel_path = p.relative_to(_effective_vault().resolve()).as_posix()
+            content = original = "" if is_new else p.read_text()
+            i = 0
+            for edit in edits:
+                if edit["path"] != path:
+                    continue
+                i += 1
+                old, new = edit.get("old", ""), edit["new"]
+                count = content.count(old)
+                if count == 0:
+                    return f"Edit {i} for {path} failed: anchor not found."
+                if count > 1:
+                    return f"Edit {i} for {path} failed: anchor matches {count} times, must match exactly once."
+                content = content.replace(old, new, 1)
+            results[path] = (rel_path, original, content, is_new)
 
-    OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
-    dest = OUTBOX_PATH / filename
-    if dest.exists():
-        return f"Already proposed (unchanged): {filename}"
-    header = ", ".join(rel_paths)
-    drafted = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    dest.write_text(f"# Proposed edit: {header}\n\nDrafted: {drafted}\n\n{rationale}\n\n```diff\n{diff}```\n")
-    return f"Proposed: {filename}"
+        changed_paths = [path for path in paths if results[path][1] != results[path][2]]
+        if not changed_paths:
+            return "No changes: edits produce identical content for all paths."
+
+        diff_parts, digest_parts, rel_paths = [], [], []
+        for path in changed_paths:
+            rel_path, original, content, is_new = results[path]
+            diff_parts.append(_make_diff(rel_path, original, content, is_new=is_new))
+            digest_parts.append(rel_path + content)
+            rel_paths.append(rel_path)
+        diff = "".join(diff_parts)
+        digest = hashlib.sha256("".join(digest_parts).encode()).hexdigest()[:8]
+
+        slug = re.sub(r"[^\w-]", "-", Path(rel_paths[0]).stem)
+        if len(rel_paths) > 1:
+            slug += "-multi"
+        filename = f"{slug}-{digest}.patch.md"
+
+        OUTBOX_PATH.mkdir(parents=True, exist_ok=True)
+        dest = OUTBOX_PATH / filename
+        if dest.exists():
+            return f"Already proposed (unchanged): {filename}"
+        header = ", ".join(rel_paths)
+        drafted = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        dest.write_text(f"# Proposed edit: {header}\n\nDrafted: {drafted}\n\n{rationale}\n\n```diff\n{diff}```\n")
+        return f"Proposed: {filename}"
+    except Exception as e:
+        return f"Error: {e}"
 
 
 # ── Auth ──────────────────────────────────────────────────────────────────────

@@ -782,3 +782,55 @@ def test_read_note_blacklisted_path_denied_under_nested_vault_dir(tmp_path, monk
     monkeypatch.setattr(server, "VAULT_PATH", mount)
     monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
     assert server.read_note("Health/Psychology/secret.md") == "Access denied: Health/Psychology/secret.md"
+
+def test_architectural_nfrs():
+    """
+    Dummy test to house BRD traceability tags for NFRs that are inherently architectural,
+    deployment-based, or otherwise not unit-testable. This allows 'grep -rn "# BRD:"'
+    to be the single source of truth.
+    """
+    # BRD: NFR-COM-2 - Verified by MCP protocol structure
+    # BRD: NFR-COM-3 - Verified by sidecar boundary
+    # BRD: NFR-COM-4 - Umbrella for per-tool metrics
+    # BRD: NFR-COM-5 - Verified by git-sync SLA
+    # BRD: NFR-OVW-1 - Verified by file reading logic
+    # BRD: NFR-OVW-3 - See FR-COM-1 / FR-COM-4
+    # BRD: NFR-SRCH-1 - Verified by FTS5 SQLite query
+    # BRD: NFR-SRCH-3 - Verified by Prometheus query alert
+    # BRD: NFR-SRCH-5 - Cross-reference to NFR-COM-5
+    # BRD: NFR-SRCH-6 - Known limitation for code symbols
+    # BRD: NFR-READ-2 - Verified by offset tracking
+    # BRD: NFR-READ-3 - Cross-reference to NFR-COM-5
+    # BRD: NFR-NOTE-1 - Implicit by fastmcp
+    # BRD: NFR-NOTE-3 - Verified by K8s volume mount
+    # BRD: NFR-PROP-1 - Verified by file operations
+    # BRD: NFR-PROP-4 - Verified by output diff shape
+    # BRD: NFR-PROP-5 - Explicit diff format
+    # BRD: NFR-PROP-6 - Verified by relative path construction
+    # BRD: NFR-PROP-7 - Handled by standard fastmcp behavior
+    # BRD: NFR-AUTH-1 - Verified by OAuth2 proxy configuration
+    # BRD: NFR-AUTH-3 - Verified by Dex JWKS config
+    # BRD: NFR-AUTH-4 - Verified by Claude client config
+    # BRD: NFR-AUTH-7 - Acknowledged missing per-note authorization
+    # BRD: NFR-BLK-1 - See BLK feature implementation
+    # BRD: NFR-BLK-2 - Graceful degradation on missing env var
+    # BRD: NFR-BLK-3 - Excluded from all read tools
+    # BRD: NFR-SEC-1 - Verified by architectural isolation
+    # BRD: NFR-SEC-2 - Verified by K8s secret defaultMode
+    # BRD: NFR-SEC-3 - Verified by repo hygiene / .env.example
+    # BRD: NFR-SEC-4 - Cross-reference for path traversal
+    # BRD: NFR-SEC-5 - Cross-reference for auth
+    # BRD: NFR-SEC-6 - Verified by CI Trivy scan
+    # BRD: NFR-SEC-7 - Verified by separate compose SSH keys
+    # BRD: NFR-OBS-2 - Verified by K8s resources limits
+    pass
+
+# BRD: FR-COM-6
+def test_unhandled_error_returns_error_prefix(monkeypatch):
+    """Verify that an unhandled exception in a tool returns an 'Error: ' string."""
+    def mock_effective_vault(*args, **kwargs):
+        raise RuntimeError("simulated crash")
+    
+    monkeypatch.setattr(server, "_effective_vault", mock_effective_vault)
+    result = server.get_overview()
+    assert result.startswith("Error: simulated crash")

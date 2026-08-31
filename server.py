@@ -170,7 +170,7 @@ def get_overview() -> str:
         result = "\n\n---\n\n".join(parts) or "Vault unavailable."
         OVERVIEW_CHARS.inc(len(result))
         return result
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
         return f"Error: {e}"
 
 
@@ -215,7 +215,7 @@ def search(query: str) -> str:
         result = "\n\n".join(f"**{r[0]}** — {r[1]}\n{r[2]}" for r in rows)
         SEARCH_CHARS.inc(len(result))
         return result
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
         return f"Error: {e}"
 
 
@@ -247,7 +247,7 @@ def read_note(path: str, offset: int = 0) -> str:
         result = chunk
         READ_CHARS.inc(len(result))
         return result
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
         return f"Error: {e}"
 
 
@@ -270,7 +270,7 @@ def note(title: str, content: str) -> str:
             dest = OUTBOX_PATH / filename
         dest.write_text(f"# {title}\n\n{content}\n")
         return f"Saved to inbox: {filename}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
         return f"Error: {e}"
 
 
@@ -363,7 +363,7 @@ def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
         drafted = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         dest.write_text(f"# Proposed edit: {header}\n\nDrafted: {drafted}\n\n{rationale}\n\n```diff\n{diff}```\n")
         return f"Proposed: {filename}"
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
         return f"Error: {e}"
 
 

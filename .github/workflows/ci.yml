@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - run: pip install ruff --quiet
+      - run: pip install -r requirements-dev.txt --quiet
       - run: ruff check server.py
 
   test:

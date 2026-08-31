@@ -137,6 +137,7 @@ SEARCH_CHARS    = Counter("mcp_search_chars_total",    "Characters returned by s
 READ_CHARS      = Counter("mcp_read_chars_total",       "Characters returned by read_note")
 SEARCH_MISSES   = Counter("mcp_search_misses_total",   "Search queries that returned no results")
 NOTE_COUNTER    = Counter("mcp_notes_total",            "Total note tool calls")
+PROPOSE_COUNTER = Counter("mcp_propose_edits_total",    "Total propose_edit tool calls")
 
 
 def _effective_vault() -> Path:

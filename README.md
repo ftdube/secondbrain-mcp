@@ -133,7 +133,13 @@ The `git-sync` sidecar polls the vault git repo every 5 minutes. The server dete
 
 **push-sync** is a small custom sidecar (`./sidecars`) built on `alpine/git`. It watches `OUTBOX_PATH` for files written by the `note` and `propose_edit` tools, routes `*.patch.md` files to `PROPOSALS_DIR/` (default `Proposals`) and everything else to `NOTE_INBOX/` (default `Inbox`) in the vault repo, commits, and pushes. This keeps git out of the main server container.
 
-Both sidecars share `GIT_REPO_URL`, `GIT_BRANCH` (default: `main`), and the SSH key at `/ssh/id_ed25519` (configured via `SSH_KEY_PATH` in `.env`). See `compose.yaml` for the full configuration — it is the authoritative reference for sidecar env vars.
+Both sidecars share `GIT_REPO_URL` and `GIT_BRANCH` (default: `main`). `push-sync` uses the SSH key at `/ssh/id_ed25519` (configured via `SSH_KEY_PATH` in `.env`), while `git-sync` uses a separate read-only key (configured via `GITSYNC_SSH_KEY_PATH` in `.env`). See `compose.yaml` for the full configuration — it is the authoritative reference for sidecar env vars.
+
+**Generating the read-only key for git-sync:**
+To enforce the least-privilege security model, `git-sync` requires its own SSH key that is restricted to read-only access on your Git host:
+1. Generate the key: `ssh-keygen -t ed25519 -f ~/.ssh/git_sync_ed25519 -N ""`
+2. Add the public key (`~/.ssh/git_sync_ed25519.pub`) to your Git host (GitHub, GitLab, etc.) as a **Read-Only** Deploy Key. Do not grant write access.
+3. Add `GITSYNC_SSH_KEY_PATH=~/.ssh/git_sync_ed25519` to your `.env` file.
 
 For local dev without a git repo, run only `docker compose up mcp`.
 

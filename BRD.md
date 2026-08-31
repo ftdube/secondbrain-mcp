@@ -5,7 +5,7 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.11 (Draft) |
+| Document version | 1.13 (Draft) |
 | System / API version documented | 1.3.1 |
 | Date | 2026-08-23 |
 | Author | Claude Code, on behalf of the repository owner |
@@ -28,6 +28,8 @@
 | 1.9 | 2026-08-23 | Restructure: extracted risk register to `RISKS.md` (was §14); folded RTM (was §16) into a §9.1 traceability requirement; moved Open Issues (was §17) to GitHub Issues. Added the hard rule this revision itself follows — this document states requirements, not a session-by-session log. Full detail for every prior revision lives in git history and PR descriptions, not here. |
 | 1.10 | 2026-08-23 | From real-world usage review: added FR-COM-5 (unambiguous `note`-vs-`propose_edit` boundary); reworked FR-PROP-1/2/6 and added FR-PROP-9 to let `propose_edit` create new files atomically within a diff instead of failing; amended FR-PROP-4 to add an informational `Drafted:` timestamp header. Implemented and regression-tested; system version → 1.3.0. |
 | 1.11 | 2026-08-23 | Gap audit on the v1.10 work. Found and fixed a real corruption bug: added NFR-PROP-11 — a create-target drifted (independently created) between drafting and applying was silently 3-way-merged with `<<<<<<<` conflict markers written to disk while `check()` reported clean, because a create's `/dev/null` base doesn't need the historical-blob lookup that NFR-PROP-9's dummy hash blocks for edits; fixed in `apply_proposals.py` with an explicit existence pre-check. Also closed traceability gaps: tagged two untagged-but-already-covered tests (FR-NOTE-4, NFR-NOTE-4) and added NFR-COM-4/NFR-SRCH-1/NFR-SRCH-5/NFR-SEC-1..6 to the §9.1 excused list as pre-existing architectural facts. System version → 1.3.1 (bug fix, no tool contract change). |
+| 1.12 | 2026-08-25 | Comparative gap audit against the sibling `vault-publisher` repo's BRD (same operator, same self-hosted cluster), requested to check for portable security/monitoring/uptime requirements. Added new §9.11 (OBS): FR-OBS-1 (`/health` readiness signal) and NFR-OBS-1 (reindex-staleness gauge), both Not implemented, tracked as [issue #59](https://github.com/ftdube/secondbrain-mcp/issues/59)/[#60](https://github.com/ftdube/secondbrain-mcp/issues/60); NFR-OBS-2 (RAM bound, Could) tracked as [issue #61](https://github.com/ftdube/secondbrain-mcp/issues/61). Added NFR-SEC-7 (§12) — `git-sync` currently shares `push-sync`'s read-write SSH key (`compose.yaml`, documented in `README.md`), giving the read-only sidecar unnecessary write credentials; Not implemented, tracked as [issue #58](https://github.com/ftdube/secondbrain-mcp/issues/58) and `RISKS.md` RISK-11. No system-version bump — documentation and backlog only, no code changed. |
+| 1.13 | 2026-08-26 | Implemented NFR-SEC-7 (issue #58): `git-sync` now uses a separate read-only SSH key via `GITSYNC_SSH_KEY_PATH`. Updated `README.md` with key generation instructions. |
 
 Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 
@@ -74,7 +76,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 
 ## 4. Scope
 
-### 4.1 In Scope (this revision, v1.2.0)
+### 4.1 In Scope (system version 1.3.1 — see §11.3 for the version history)
 
 - Five MCP tools: `get_overview`, `search`, `read_note`, `note`, `propose_edit`.
 - FTS5 (SQLite) keyword search over the vault, chunked at heading boundaries.
@@ -84,7 +86,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 - Operational HTTP endpoints: health check, Prometheus metrics, manual reindex trigger, OAuth protected-resource metadata.
 - An operator-configured `VAULT_BLACKLIST` excluding chosen vault subdirectories from indexing, `read_note`, and `propose_edit` (§9.10).
 
-### 4.2 Out of Scope (this revision)
+### 4.2 Out of Scope (system version 1.3.1)
 
 | Item | Why |
 |---|---|
@@ -176,7 +178,9 @@ Each requirement has a stable ID of the form `FR-<AREA>-<n>` or `NFR-<AREA>-<n>`
 
 **Traceability requirement.** Every requirement in this section SHALL be traceable to either an inline `# BRD: <ID>[, <ID>...]` comment directly above a `test_*` function in `tests/test_server.py`/`tests/test_apply_proposals.py`/`tests/test_auth.py`, or an explicit note in this document for why it is not independently unit-testable (e.g. an architectural or deployment fact). Run `grep -rn "# BRD:" tests/test_*.py` for the current, authoritative mapping — this is deliberately not duplicated as a table in this document (a hand-maintained copy tried in document v1.0–v1.8 drifted from the actual suite the moment either changed, silently, and added nothing a live `grep` doesn't already answer). A requirement found untraceable and not yet excused becomes a [GitHub Issue](https://github.com/ftdube/secondbrain-mcp/issues), not a row in a BRD table.
 
-As of document v1.11, the following are excused from that requirement as inherent architectural, deployment, or process facts rather than unit-testable behavior — asserting "runs on Kubernetes" or "delegates identity to Dex" isn't something a unit test proves: `NFR-COM-2`, `NFR-COM-3`, `NFR-COM-4` (umbrella statement instantiated, and independently tested, per tool as NFR-OVW-2/NFR-SRCH-2/NFR-READ-1/NFR-NOTE-2/NFR-PROP-10), `NFR-COM-5`, `NFR-OVW-1`, `NFR-OVW-3`, `NFR-SRCH-1` (no-network-call design fact), `NFR-SRCH-3`, `NFR-SRCH-5` (pure cross-reference to NFR-COM-5, same pattern as the already-excused NFR-READ-3), `NFR-READ-2`, `NFR-READ-3`, `NFR-NOTE-1`, `NFR-NOTE-3`, `NFR-PROP-1`, `NFR-PROP-4`, `NFR-PROP-5`, `NFR-PROP-6`, `NFR-PROP-7`, `NFR-AUTH-1`, `NFR-AUTH-3`, `NFR-AUTH-4`, `NFR-AUTH-7`, `NFR-BLK-1`, `NFR-BLK-2`, `NFR-BLK-3`, `NFR-SEC-1`..`NFR-SEC-6` (repo-hygiene/deployment/CI-pipeline facts, or pure cross-references to other requirements). This list exists so a future audit doesn't spend time re-deriving which NFRs fall in this bucket, or re-flagging one as a gap (three prior audits, in document v1.1, v1.6, and v1.11, each spent real effort re-examining this exact question) — remove an ID from it only when it becomes independently testable, not on a recurring review cadence.
+As of document v1.12, the following are excused from that requirement as inherent architectural, deployment, or process facts rather than unit-testable behavior — asserting "runs on Kubernetes" or "delegates identity to Dex" isn't something a unit test proves: `NFR-COM-2`, `NFR-COM-3`, `NFR-COM-4` (umbrella statement instantiated, and independently tested, per tool as NFR-OVW-2/NFR-SRCH-2/NFR-READ-1/NFR-NOTE-2/NFR-PROP-10), `NFR-COM-5`, `NFR-OVW-1`, `NFR-OVW-3`, `NFR-SRCH-1` (no-network-call design fact), `NFR-SRCH-3`, `NFR-SRCH-5` (pure cross-reference to NFR-COM-5, same pattern as the already-excused NFR-READ-3), `NFR-READ-2`, `NFR-READ-3`, `NFR-NOTE-1`, `NFR-NOTE-3`, `NFR-PROP-1`, `NFR-PROP-4`, `NFR-PROP-5`, `NFR-PROP-6`, `NFR-PROP-7`, `NFR-AUTH-1`, `NFR-AUTH-3`, `NFR-AUTH-4`, `NFR-AUTH-7`, `NFR-BLK-1`, `NFR-BLK-2`, `NFR-BLK-3`, `NFR-SEC-1`..`NFR-SEC-7` (repo-hygiene/deployment/CI-pipeline facts, or pure cross-references to other requirements — `NFR-SEC-7` added document v1.12: credential provisioning is a K8s Secret/compose config fact, not unit-testable code behavior), `NFR-OBS-2` (added document v1.12: a live RAM ceiling requires a resource probe, not a unit test). This list exists so a future audit doesn't spend time re-deriving which NFRs fall in this bucket, or re-flagging one as a gap (three prior audits, in document v1.1, v1.6, and v1.11, each spent real effort re-examining this exact question) — remove an ID from it only when it becomes independently testable, not on a recurring review cadence. Maintaining this long "excused list" in the BRD creates document-maintenance overhead. Future work SHOULD represent excused NFRs directly in the codebase as dummy assertions (e.g., `# BRD: NFR-COM-2 - Verified by K8s manifest`) so `grep` can truly be the single source of truth without BRD-text exemptions.
+
+`FR-OBS-1` and `NFR-OBS-1` (§9.11, added document v1.12) are deliberately **not** excused — both are ordinary `server.py` logic and SHALL get regression tests once implemented (tracked by their GitHub issues, not yet by a test since the code doesn't exist yet).
 
 ### 9.2 Common / Cross-Tool Requirements (`COM`)
 
@@ -186,6 +190,7 @@ As of document v1.11, the following are excused from that requirement as inheren
 |---|---|---|---|
 | FR-COM-1 | Every tool argument that names a vault path SHALL be resolved strictly inside the effective vault root; traversal (`..`) and symlink escape SHALL be rejected. | Must | Implemented |
 | FR-COM-2 | Every tool SHALL return a plain UTF-8 string for both success and failure outcomes; no tool SHALL raise an unhandled exception to the MCP client. | Must | Implemented |
+| FR-COM-6 | A system or unhandled error SHALL be returned to the client prefixed with `"Error: "` (or equivalent predictable format) so the client can reliably distinguish success from failure in the plain UTF-8 return string. | Must | Not implemented — tracked as issue #63 |
 | FR-COM-3 | Write-path tools (`note`, `propose_edit`) SHALL write only to `OUTBOX_PATH`. No tool SHALL write to `VAULT_PATH` or invoke `git`. | Must | Implemented |
 | FR-COM-4 | The effective vault root SHALL be `VAULT_PATH/vault` when that path exists, else `VAULT_PATH` itself. | Must | Implemented |
 | FR-COM-5 (new, document v1.10) | `note` and `propose_edit` SHALL have mutually exclusive, unambiguous purposes stated in their tool descriptions, so the calling model has a single deciding test rather than a judgment call. **`note`** is for content not yet bound to a specific vault location — a capture, observation, or draft a human will triage and file later; the caller does not need to know, or commit to, where it belongs. **`propose_edit`** is for a deliberate, structured change to the vault's existing organization — edits to specific, already-identified note(s), and/or new note(s) at specific paths following the vault's existing conventions (FR-PROP-6) — expressed as a precise, reviewable diff. The test: if the caller can name the exact target path(s) and write the precise content without guessing, use `propose_edit`; if not, use `note`. | Must | Implemented — both tool docstrings state the boundary; see FR-PROP-6/9 for the mechanism that makes `propose_edit` capable of the "new note at a specific path" half of this test |
@@ -240,6 +245,7 @@ As of document v1.11, the following are excused from that requirement as inheren
 | NFR-SRCH-3 | `mcp_search_misses_total / mcp_searches_total` is the designated trigger metric for the Phase 1b hybrid-search decision (alert threshold: >20% miss rate over a rolling 7 days). | Must | Implemented (metric); Phase 1b itself is out of scope (§4.2) |
 | NFR-SRCH-4 | Malformed FTS5 query syntax SHALL NOT raise an unhandled `sqlite3.OperationalError` to the client. | Must | Implemented |
 | NFR-SRCH-5 | Subject to NFR-COM-5 (freshness bound). | Must | Implemented |
+| NFR-SRCH-6 | The `porter unicode61` tokenization (FR-SRCH-1) stemming may degrade matching for exact code symbols (e.g., `camelCase`, `snake_case`, punctuation). This is a known limitation for code search, accepted for Phase 1a, to be mitigated by Phase 1b embeddings. | Must (by design) | Implemented (documented limitation) |
 
 ### 9.5 `read_note(path)` (`READ`)
 
@@ -283,6 +289,7 @@ Scope boundary with `propose_edit`: see FR-COM-5.
 | NFR-NOTE-2 | Each call increments `mcp_notes_total`. | Must | Implemented |
 | NFR-NOTE-3 | `OUTBOX_PATH` SHALL be a writable volume distinct from the read-only application root. | Must | Implemented (K8s manifest responsibility) |
 | NFR-NOTE-4 | Unlike `propose_edit`, repeated `note` calls with the same title intentionally produce separate timestamped files, not a deduplicated update — each call is a new draft. | Must (by design) | Implemented |
+| NFR-NOTE-5 | Outbox pipeline failures (e.g., push-sync crash loop, upstream git push failure) SHALL NOT silently accumulate unbounded artifacts. An alert SHOULD trigger on excessive outbox age (e.g. >1hr). | Should | Not implemented — tracked as issue #66 |
 
 ### 9.7 `propose_edit(edits, rationale)` (`PROP`)
 
@@ -317,6 +324,7 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | NFR-PROP-9 (N9, new) | The diff's `index` line SHALL use a dummy `0000000..0000000` blob pair, never a real git blob hash. A real hash lets `git apply --3way` locate the historical blob and attempt a genuine content merge on drift — verified this silently writes `<<<<<<<` conflict markers into the note while `--check` reports success (false-clean). The dummy hash forces plain context matching, trading 3-way merge resilience for safety. | Must | Implemented; regression-tested |
 | NFR-PROP-10 (new) | Each call SHALL increment a dedicated Prometheus counter `mcp_propose_edits_total`, consistent with every other tool's NFR-COM-4 instance (NFR-OVW-2, NFR-SRCH-2, NFR-READ-1, NFR-NOTE-2). This requirement was missing from document v1.0/v1.1 despite the counter already existing in code since `propose_edit` was first built — added here to close that documentation gap, not to change behavior. | Must | Implemented (counter has existed since v1.1; test coverage added in v1.4) |
 | NFR-PROP-11 (new, document v1.11) | For a create (FR-PROP-6/FR-PROP-9), `apply_proposals.py` SHALL reject a create-target that already exists on disk as drift, before the patch is ever handed to `git`. NFR-PROP-9's dummy-hash protection does **not** by itself extend to creates: a create's base is declared directly as `/dev/null` in the diff text rather than resolved via the index line's blob hash, so `git apply --3way` can always reconstruct an empty base and perform a genuine 3-way merge regardless of the dummy hash. Found in the post-implementation gap audit: without this guard, applying a proposal against an independently-created target silently wrote `<<<<<<<` conflict markers into the file on disk while `check()` reported it clean — the exact false-clean failure mode NFR-PROP-9 exists to prevent, now reopened for creates specifically. Verified against a real git repo before and after the fix. | Must | Implemented; regression-tested (`test_check_stale_when_create_target_already_exists`, `test_drifted_create_apply_never_writes_conflict_markers`) |
+| NFR-PROP-12 | A rejected or terminally stale proposal (e.g., `Drafted` > 7 days old, or drifted) SHALL be explicitly cleaned up by the operator or a cron job. `scripts/apply_proposals.py` leaves stale files in place; this requires an out-of-band garbage collection mechanism to prevent queue buildup. | Should | Not implemented — tracked as issue #67 |
 
 ### 9.8 Authentication (`AUTH`)
 
@@ -340,6 +348,7 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | NFR-AUTH-3 | OIDC discovery SHALL be skipped entirely; `DEX_JWKS_URI` SHALL point directly at the in-cluster JWKS endpoint, because the deployment's edge network blocks in-cluster requests to the public Dex hostname (A4). | Must | Implemented |
 | NFR-AUTH-4 | Only OAuth 2.1 with PKCE SHALL be supported for the Claude.ai client; static long-lived bearer tokens are out of scope (C3). | Must | Implemented |
 | NFR-AUTH-5 | Any path not explicitly in `AUTH_PUBLIC` SHALL default to requiring authentication (allowlist, not denylist). | Must | Implemented |
+| NFR-AUTH-8 | The server SHALL implement a rate limit (e.g., max calls per minute per token) to prevent DOS attacks against the FTS5 SQLite database or upstream IdP from a compromised client or runaway agent loop. | Should | Not implemented — tracked as issue #64 |
 | NFR-AUTH-6 | Authentication failures SHALL be logged with enough context to debug (path, truncated Authorization-header prefix) but SHALL NOT log full tokens. | Must | Implemented |
 | NFR-AUTH-7 | **Gap:** the system implements authentication (who you are) but no per-note or per-tool authorization (what you may touch); any principal with a valid `MCP_CLIENT_ID`-audienced token has full read/propose access to the entire vault. Acceptable under the current single-user model (A5). | Should (for current scale) | Not implemented — see `RISKS.md` RISK-6 |
 
@@ -356,6 +365,12 @@ Added in this revision (v1.1 of this document): `_iter_chunks` and `build_index`
 | FR-IDX-3 | Headings of level H4 or deeper SHALL NOT be treated as chunk boundaries; they remain part of the enclosing chunk's body. | Must | Implemented |
 | FR-IDX-4 | Notes under any directory literally named `Chat Archive` SHALL be excluded from indexing (they remain readable via `read_note`/`propose_edit` — see §10). | Must | Implemented |
 | FR-IDX-5 | Re-indexing SHALL be wholesale (drop and rebuild the FTS5 table from a full vault re-scan), not incremental. | Must | Implemented (regression-tested as of v1.4 — see OI-10) |
+
+**Non-Functional**
+
+| ID | Requirement | Priority | Status |
+|---|---|---|---|
+| NFR-IDX-1 | The maximum acceptable index build time SHALL stay under 60 seconds for the target vault size, so the wholesale `DROP` and full re-scan (FR-IDX-5) does not routinely break the 5.5-minute freshness SLA (NFR-COM-5). | Should | Not implemented — tracked as issue #65 |
 
 ### 9.10 Vault Path Blacklist (`BLK`)
 
@@ -379,13 +394,30 @@ Added as a requirements-only proposal in document v1.2; **implemented in documen
 | NFR-BLK-2 | An empty or unset `VAULT_BLACKLIST` SHALL be exactly equivalent to today's behavior (only the hardcoded `Chat Archive` exclusion applies) — the feature SHALL be backward compatible by default. | Must | Implemented — the full pre-existing test suite (74 tests) passes unchanged with `VAULT_BLACKLIST` unset |
 | NFR-BLK-3 | Blacklist filtering SHALL be implemented as an extension of `_resolve_in_vault` itself (the function backing FR-COM-1), applied *after* the existing traversal-safe path resolution succeeds — never as a replacement for it, and never in a way that weakens FR-COM-1's traversal/symlink-escape guarantee. Placing it in the shared helper, rather than duplicating a check inside `read_note` and `propose_edit` separately, is what makes FR-BLK-5 fall out for free instead of needing its own independent enforcement path that could drift out of sync with FR-BLK-3. | Must | Implemented exactly as specified — see `_resolve_in_vault` in `server.py` |
 
+### 9.11 Observability & Operational Health (OBS)
+
+Added in document v1.12, following a comparative gap audit against the sibling `vault-publisher` repo's BRD (same operator, same self-hosted RPi5 cluster) — see revision history. None of this section is implemented yet; each row is tracked by a GitHub issue rather than left as an unowned aspiration.
+
+**Functional**
+
+| ID | Requirement | Priority | Status |
+|---|---|---|---|
+| FR-OBS-1 | `GET /health` SHALL report, in addition to bare process liveness, whether at least one index build has completed successfully since process start (e.g. an `"indexed": true\|false` field alongside the existing `"status": "ok"`), so a Kubernetes readinessProbe distinct from a liveness probe can withhold traffic during the pre-first-index-build window rather than routing `search`/`read_note` calls against an empty index. Mirrors `vault-publisher` BRD.md §13's readiness/liveness split, added there specifically to gate its own pre-first-build window (its RISK-2). | Should | Not implemented — see [issue #59](https://github.com/ftdube/secondbrain-mcp/issues/59), `RISKS.md` RISK-12 |
+
+**Non-Functional**
+
+| ID | Requirement | Priority | Status |
+|---|---|---|---|
+| NFR-OBS-1 | The server SHALL expose a gauge metric (e.g. `mcp_last_reindex_timestamp_seconds`) recording the Unix timestamp of the last successful index build, so an abnormally large gap (git-sync outage, expired deploy key, vault-watcher crash) is visible to Prometheus/alerting rather than silently degrading `NFR-COM-5`'s freshness bound indefinitely — the same proactive-alert pattern `NFR-SRCH-3` already uses for search miss-rate. | Should | Not implemented — see [issue #60](https://github.com/ftdube/secondbrain-mcp/issues/60), `RISKS.md` RISK-13 |
+| NFR-OBS-2 | Idle resident RAM SHOULD stay under 150 MB and peak RAM during a full reindex SHOULD stay under 500 MB — headroom around `G6`'s ~80 MB observed target, not a change to it. The Kubernetes Deployment SHOULD declare matching `resources.requests`/`resources.limits` once this service's own manifests exist, so an unbounded pod cannot starve neighbors on the same constrained cluster (compare `vault-publisher` BRD.md NFR-POLL-1/NFR-BUILD-1, motivated by the same RPi5 4GB cluster and its prior real starvation problem, §2 there). | Could | Not implemented — see [issue #61](https://github.com/ftdube/secondbrain-mcp/issues/61), `RISKS.md` RISK-14 |
+
 ## 10. Data Requirements
 
 | Data | Location | Format | Notes |
 |---|---|---|---|
 | Vault notes | Effective vault root, recursive | Markdown, UTF-8 (decoded with `errors="replace"`) | Directories named `Chat Archive` are excluded from the FTS5 index only — still readable via `read_note`/`propose_edit`. `VAULT_BLACKLIST` entries (§9.10) are excluded from *both* indexing and `read_note`/`propose_edit` — an actual access-control boundary, not just an indexing exclusion |
 | FTS5 index | `DB_PATH` (SQLite file) | `chunks_fts(path UNINDEXED, heading, body)`, `porter unicode61` tokenizer | Rebuilt wholesale (`DROP` + `CREATE` + full re-scan) on every (re)index; not incremental |
-| Outbox artifacts | `OUTBOX_PATH` | `*.md` (notes) or `*.patch.md` (proposals) | Transient — removed from the outbox once push-sync has committed and pushed them |
+| Outbox artifacts | `OUTBOX_PATH` | `*.md` (notes) or `*.patch.md` (proposals) | Transient — removed from the outbox once push-sync has committed and pushed them. If push-sync crashes or upstream git push fails consistently, artifacts will accumulate; an alert SHOULD trigger on excessive outbox age (e.g. >1hr) to avoid unbounded buildup (see NFR-NOTE-5). |
 | Proposals queue | `Proposals/` in the vault git repo | `*.patch.md`: rationale header + fenced git diff | Removed by `scripts/apply_proposals.py` on successful apply; left in place (never partially consumed) when stale |
 
 ## 11. Interface Requirements
@@ -416,7 +448,7 @@ This service's HTTP surface is a mix of (a) fixed-convention operational endpoin
 | MCP tool surface (`tools/list` / `tools/call`) | **Versioned per-tool, additively.** Adding a tool (like `propose_edit` in this revision) is a MINOR bump. A breaking change to an existing tool's arguments or return contract would ship as a **new tool name** (e.g. `propose_edit_v2`) rather than mutate the existing contract, so already-deployed clients never silently break. | MCP has no native URL-path versioning; the tool name *is* the addressable unit. |
 | This document | **Semantic versioning via the "System / API version documented" field in Document Control.** MAJOR for any breaking tool contract change or tool removal; MINOR for an additive tool or field; PATCH for description/documentation fixes with no behavior change. | Gives operators and reviewers a single number to diff against when the service changes. |
 
-Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** — this revision — adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior). No existing tool's contract changed in either bump.
+Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior); **v1.3.0** lets `propose_edit` create new files (FR-PROP-6/9), additive; **v1.3.1** — current — is a bug fix only (NFR-PROP-11), no tool contract change. No existing tool's contract changed in any of these bumps. §9.11's new requirements (document v1.12) are not yet implemented and have not moved this number.
 
 Separately, the **MCP protocol version** itself (negotiated during the `initialize` handshake, e.g. a dated string such as `2025-06-18`) is orthogonal to this service's own version number and is determined by the installed `fastmcp`/MCP SDK version, not by this document — the two SHOULD NOT be conflated in future revisions.
 
@@ -432,6 +464,7 @@ This section consolidates and cross-references §9.2 and §9.8; only requirement
 | NFR-SEC-4 | See FR-COM-1 / NFR-PROP-6 for path-traversal and symlink-escape rejection, applied uniformly to every tool that accepts a vault path. | Must | Implemented |
 | NFR-SEC-5 | See §9.8 in full for authentication requirements; see NFR-AUTH-7 for the accepted authorization gap. | Must | Implemented (with documented gap) |
 | NFR-SEC-6 (new, document v1.6) | CI SHALL run a filesystem vulnerability scan (currently `aquasecurity/trivy-action`) on every push and pull request, failing the build on any `CRITICAL` or `HIGH` severity finding; the `build` and `build-push-sync` image-publish jobs SHALL depend on this scan passing. This control existed in `.github/workflows/ci.yml` since before this document's first issue but was never itself documented as a requirement — found during the v1.6 gap audit. | Must | Implemented (`.github/workflows/ci.yml` `scan` job) — undocumented until now |
+| NFR-SEC-7 (new, document v1.12) | The `git-sync` sidecar (read side, §8) SHALL use a credential scoped to read-only repository access, distinct from `push-sync`'s read-write deploy key; the two SHALL NOT share key material. Found during a comparative gap audit against `vault-publisher`'s `NFR-SEC-2` (its git-sync sidecar has no push access at all, by design, specifically to narrow blast radius on compromise): `compose.yaml` currently mounts one identical SSH key into both `git-sync` and `push-sync` via a shared YAML anchor (`x-ssh-key`), documented as intentional in `README.md`. If that key carries push rights, as it must for `push-sync` to function, `git-sync` unnecessarily holds write-capable credentials on disk even though §8's component table already states it never pushes (it "*is* the source of the mirror, but pulls only"). | Must | Implemented (PR #62 separates the keys via `GITSYNC_SSH_KEY_PATH` and provides generation instructions). Tracked as [issue #58](https://github.com/ftdube/secondbrain-mcp/issues/58), `RISKS.md` RISK-11 |
 
 ## 13. Observability & Monitoring Requirements
 
@@ -442,8 +475,9 @@ This section consolidates and cross-references §9.2 and §9.8; only requirement
 | `mcp_reads_total`, `mcp_read_chars_total` | Counter | NFR-READ-1 |
 | `mcp_notes_total` | Counter | NFR-NOTE-2 |
 | `mcp_propose_edits_total` | Counter | NFR-PROP-10 |
+| `mcp_last_reindex_timestamp_seconds` | Gauge | NFR-OBS-1 *(§9.11, not yet implemented — [issue #60](https://github.com/ftdube/secondbrain-mcp/issues/60))* |
 
-All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheus scraping; no dashboards or alerting rules are defined by this document beyond the Phase 1b trigger already specified in `next-steps.md` (NFR-SRCH-3).
+All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheus scraping; no dashboards or alerting rules are defined by this document beyond the Phase 1b trigger already specified in `next-steps.md` (NFR-SRCH-3). `/health`'s planned readiness signal (FR-OBS-1, §9.11) is a separate, non-metric mechanism intended for K8s probe wiring, not Prometheus.
 
 ## 14. Success Metrics / KPIs & Acceptance Criteria
 

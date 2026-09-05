@@ -77,7 +77,7 @@ VAULT_PATH=/path/to/vault docker compose up mcp
 | `DB_PATH` | no | SQLite database path (default: `/data/index.db`) |
 | `OUTBOX_PATH` | no | Directory where `note`/`propose_edit` write files for push-sync (default: `/outbox`) |
 | `AUTH_PUBLIC_EXTRA` | no | Comma-separated paths to add to the public (no-auth) list |
-| `VAULT_BLACKLIST` | no | Comma-separated vault-relative directory prefixes excluded from indexing, `read_note`, and `propose_edit` (e.g. `Health/Psychology,Personal Care/Journal`) |
+| `VAULT_BLACKLIST` | no | Comma-separated vault-relative directory prefixes excluded from indexing, `read_note`, and `propose_edit` (e.g. `Private/Journal,Restricted/Notes`) |
 
 ## Endpoints
 

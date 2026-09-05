@@ -58,7 +58,7 @@ def _parse_blacklist(raw: str) -> tuple[tuple[str, ...], ...]:
     Empty/unset is exactly today's behavior (NFR-BLK-2). Leading slashes are
     stripped: entries are relative by definition, and Path("/x").parts == ("/",
     "x") would otherwise never match a real relative path — a plausible typo
-    (e.g. "/Health/Psychology") would then silently blacklist nothing."""
+    (e.g. "/Private/Journal") would then silently blacklist nothing."""
     return tuple(
         Path(entry).parts
         for entry in (p.strip().lstrip("/") for p in raw.split(","))
@@ -70,8 +70,8 @@ VAULT_BLACKLIST: tuple[tuple[str, ...], ...] = _parse_blacklist(os.environ.get("
 
 
 def _is_blacklisted(rel_path: Path) -> bool:
-    """FR-BLK-4: path-segment prefix match, so 'Health/Psychology' excludes
-    'Health/Psychology/*' but not the sibling file 'Health/PsychologyNotes.md'."""
+    """FR-BLK-4: path-segment prefix match, so 'Private/Journal' excludes
+    'Private/Journal/*' but not the sibling file 'Private/JournalNotes.md'."""
     parts = rel_path.parts
     return any(parts[: len(prefix)] == prefix for prefix in VAULT_BLACKLIST)
 

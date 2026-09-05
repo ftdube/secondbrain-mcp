@@ -44,9 +44,9 @@ Full original requirements (F1-F8, N1-N7) and validation plan (V1-V7) in vault `
 
 `VAULT_BLACKLIST` env var (comma-separated vault-relative directory prefixes) excludes matching notes from indexing, `read_note`, and `propose_edit`. Lives entirely inside `_resolve_in_vault`, so `read_note`/`propose_edit` inherit it with zero tool-specific code; `build_index` gets a matching exclusion, additive to the existing `Chat Archive` indexing-only exclusion. Full spec in `BRD.md` §9.10 (FR-BLK-1..5, NFR-BLK-1..3, all now Implemented).
 
-**Bug found and fixed same-day:** a leading slash in an entry (e.g. `/Health/Psychology` instead of `Health/Psychology`) produced `Path("/Health/Psychology").parts == ("/", "Health", "Psychology")`, which would never match a real relative path's parts — a plausible operator typo would silently blacklist nothing. Fixed by stripping leading slashes during parsing (`_parse_blacklist`), regression-tested.
+**Bug found and fixed same-day:** a leading slash in an entry (e.g. `/Private/Journal` instead of `Private/Journal`) produced `Path("/Private/Journal").parts == ("/", "Private", "Journal")`, which would never match a real relative path's parts — a plausible operator typo would silently blacklist nothing. Fixed by stripping leading slashes during parsing (`_parse_blacklist`), regression-tested.
 
-**Not yet done:** real end-to-end validation — mounting an actual vault with a real blacklisted directory (e.g. the Psychology domain, which is already marked read-on-request-only in the vault's own `context.md`) and confirming it's actually unreachable via a live Claude session, not just unit tests against synthetic fixtures. Trigger: before relying on this to actually hide anything, test IRL against a real deployment.
+**Not yet done:** real end-to-end validation — mounting an actual vault with a real blacklisted directory (one already restricted by convention in the vault's own `context.md`) and confirming it's actually unreachable via a live Claude session, not just unit tests against synthetic fixtures. Trigger: before relying on this to actually hide anything, test IRL against a real deployment.
 
 ## Second deployment — allowlist view
 

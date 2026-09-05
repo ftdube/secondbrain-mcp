@@ -691,10 +691,10 @@ def test_parse_blacklist_strips_leading_slashes():
     # ("/", "x"), which would never match a real relative path's parts — a
     # plausible operator typo (leading slash) would silently blacklist
     # nothing instead of erroring or matching.
-    assert server._parse_blacklist("/Health/Psychology, Finance/ , //Career") == (
-        ("Health", "Psychology"),
-        ("Finance",),
-        ("Career",),
+    assert server._parse_blacklist("/Private/Journal, Archive/ , //Drafts") == (
+        ("Private", "Journal"),
+        ("Archive",),
+        ("Drafts",),
     )
 
 
@@ -705,68 +705,68 @@ def test_parse_blacklist_empty_string_yields_empty_tuple():
 
 # BRD: FR-BLK-4
 def test_is_blacklisted_prefix_matching(monkeypatch):
-    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
-    assert server._is_blacklisted(Path("Health/Psychology/Notes.md")) is True
-    assert server._is_blacklisted(Path("Health/Psychology.md")) is False
-    assert server._is_blacklisted(Path("Health/PsychologyNotes.md")) is False
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Private", "Journal"),))
+    assert server._is_blacklisted(Path("Private/Journal/Notes.md")) is True
+    assert server._is_blacklisted(Path("Private/Journal.md")) is False
+    assert server._is_blacklisted(Path("Private/JournalNotes.md")) is False
     assert server._is_blacklisted(Path("Other/Notes.md")) is False
 
 
 # BRD: FR-BLK-3
 def test_read_note_blacklisted_path_denied(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
-    (vault / "Health" / "Psychology").mkdir(parents=True)
-    (vault / "Health" / "Psychology" / "secret.md").write_text("private")
+    (vault / "Private" / "Journal").mkdir(parents=True)
+    (vault / "Private" / "Journal" / "secret.md").write_text("private")
     monkeypatch.setattr(server, "VAULT_PATH", vault)
-    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
-    assert server.read_note("Health/Psychology/secret.md") == "Access denied: Health/Psychology/secret.md"
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Private", "Journal"),))
+    assert server.read_note("Private/Journal/secret.md") == "Access denied: Private/Journal/secret.md"
 
 
 # BRD: FR-BLK-4 (a sibling file with a similar name is not caught by the prefix)
 def test_read_note_sibling_of_blacklisted_dir_still_readable(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
-    (vault / "Health").mkdir(parents=True)
-    (vault / "Health" / "PsychologyNotes.md").write_text("not private")
+    (vault / "Private").mkdir(parents=True)
+    (vault / "Private" / "JournalNotes.md").write_text("not private")
     monkeypatch.setattr(server, "VAULT_PATH", vault)
-    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
-    assert server.read_note("Health/PsychologyNotes.md") == "not private"
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Private", "Journal"),))
+    assert server.read_note("Private/JournalNotes.md") == "not private"
 
 
 # BRD: FR-BLK-5
 def test_propose_edit_blacklisted_path_denied(tmp_path, monkeypatch):
     vault, outbox = _propose_setup(tmp_path, monkeypatch)
-    (vault / "Health" / "Psychology").mkdir(parents=True)
-    (vault / "Health" / "Psychology" / "secret.md").write_text("old\n")
-    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
+    (vault / "Private" / "Journal").mkdir(parents=True)
+    (vault / "Private" / "Journal" / "secret.md").write_text("old\n")
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Private", "Journal"),))
 
     result = server.propose_edit(
-        [{"path": "Health/Psychology/secret.md", "old": "old", "new": "new"}], "r"
+        [{"path": "Private/Journal/secret.md", "old": "old", "new": "new"}], "r"
     )
 
-    assert result == "Access denied: Health/Psychology/secret.md"
+    assert result == "Access denied: Private/Journal/secret.md"
     assert list(outbox.glob("*.patch.md")) == []
 
 
 # BRD: FR-BLK-5, FR-PROP-6, FR-PROP-9
 def test_propose_edit_blacklisted_new_path_denied(tmp_path, monkeypatch):
     _vault, outbox = _propose_setup(tmp_path, monkeypatch)
-    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Private", "Journal"),))
 
     result = server.propose_edit(
-        [{"path": "Health/Psychology/new-secret.md", "new": "content"}], "r"
+        [{"path": "Private/Journal/new-secret.md", "new": "content"}], "r"
     )
 
-    assert result == "Access denied: Health/Psychology/new-secret.md"
+    assert result == "Access denied: Private/Journal/new-secret.md"
     assert list(outbox.glob("*.patch.md")) == []
 
 
 # BRD: FR-BLK-2
 def test_build_index_excludes_blacklisted_notes(tmp_path, monkeypatch):
     vault = tmp_path / "vault"
-    (vault / "Health" / "Psychology").mkdir(parents=True)
-    (vault / "Health" / "Psychology" / "secret.md").write_text("# Secret\n\nprivate content")
-    (vault / "Health" / "Public.md").write_text("# Public\n\npublic content")
-    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
+    (vault / "Private" / "Journal").mkdir(parents=True)
+    (vault / "Private" / "Journal" / "secret.md").write_text("# Secret\n\nprivate content")
+    (vault / "Private" / "Public.md").write_text("# Public\n\npublic content")
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Private", "Journal"),))
 
     n = server.build_index(vault, tmp_path / "index.db")
 
@@ -777,11 +777,11 @@ def test_build_index_excludes_blacklisted_notes(tmp_path, monkeypatch):
 def test_read_note_blacklisted_path_denied_under_nested_vault_dir(tmp_path, monkeypatch):
     mount = tmp_path / "mount"
     nested = mount / "vault"
-    (nested / "Health" / "Psychology").mkdir(parents=True)
-    (nested / "Health" / "Psychology" / "secret.md").write_text("private")
+    (nested / "Private" / "Journal").mkdir(parents=True)
+    (nested / "Private" / "Journal" / "secret.md").write_text("private")
     monkeypatch.setattr(server, "VAULT_PATH", mount)
-    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Health", "Psychology"),))
-    assert server.read_note("Health/Psychology/secret.md") == "Access denied: Health/Psychology/secret.md"
+    monkeypatch.setattr(server, "VAULT_BLACKLIST", (("Private", "Journal"),))
+    assert server.read_note("Private/Journal/secret.md") == "Access denied: Private/Journal/secret.md"
 
 def test_architectural_nfrs():
     """

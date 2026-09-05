@@ -61,7 +61,7 @@ Two options were considered for mobile access:
 1. **Reuse a generic filesystem MCP server**, exposing ~11 tools (read/write/list/move/search/etc.) — the path of least engineering effort.
 2. **Build a small, purpose-fit server** exposing only the operations the vault workflow actually needs.
 
-Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 tokens of every session's context before a single query is asked, and exposes write/delete/move operations with no review gate — an unacceptable risk for a vault that also holds sensitive personal records. Option 2 — this project — costs roughly 3,500 tokens per session (five tools) and adds no capability the vault workflow does not explicitly need.
+Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 tokens of every session's context before a single query is asked, and exposes write/delete/move operations with no review gate — an unacceptable risk for a vault that also holds financial, health, and career records. Option 2 — this project — costs roughly 3,500 tokens per session (five tools) and adds no capability the vault workflow does not explicitly need.
 
 ## 3. Goals & Objectives
 

@@ -48,6 +48,18 @@ Full original requirements (F1-F8, N1-N7) and validation plan (V1-V7) in vault `
 
 **Not yet done:** real end-to-end validation — mounting an actual vault with a real blacklisted directory (e.g. the Psychology domain, which is already marked read-on-request-only in the vault's own `context.md`) and confirming it's actually unreachable via a live Claude session, not just unit tests against synthetic fixtures. Trigger: before relying on this to actually hide anything, test IRL against a real deployment.
 
+## Second deployment — allowlist view
+
+A second deployment of the same image, configured with an **allowlist** rather than the existing denylist, reachable only over the private network.
+
+The denylist (`VAULT_BLACKLIST`) is the right default for an operator-facing deployment: everything is served unless excluded, and a forgotten exclusion is a leak. For a deployment consumed by other software rather than by the operator, that default inverts — nothing should be served unless named, so a forgotten entry is a missing answer rather than an exposure.
+
+Same image, different configuration. If this needs a code change beyond an env var, the allowlist has been designed wrong.
+
+**Open question:** whether network restriction alone is sufficient authorisation for that deployment, or whether it needs the OIDC path the operator-facing one uses. Decide when it is built, not before — the answer depends on what consumes it.
+
+**Trigger:** something other than the operator needs to query it.
+
 ## Housekeeping — extract push-sync to its own repo
 
 Trigger: CI publishing two unrelated images from one repo is messy.

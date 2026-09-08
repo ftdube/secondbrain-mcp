@@ -7,14 +7,15 @@ This project has no releases or tags. The only supported version is the current
 
 ## Reporting a vulnerability
 
-Report it privately through GitHub: **Security -> Report a vulnerability** on this
-repository. That opens a private advisory visible only to the maintainer.
+Report it privately through GitHub: **Security → Report a vulnerability** on
+this repository. That opens a private security advisory, visible to this
+repository's maintainers and to GitHub — not publicly.
 
 Please do not open a public issue for a security problem.
 
-Especially in scope: anything that breaks the boundary the project exists to
-hold -- vault contents reaching an agent server beyond the excerpts a query
-returns, or an unauthenticated path to the vault.
+Especially in scope is anything that breaks the boundary this project exists to
+hold. For example: vault contents reaching an agent server beyond the excerpts a
+query returns, or any unauthenticated path to the vault.
 
 ## What to expect
 

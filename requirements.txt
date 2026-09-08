@@ -1,6 +1,6 @@
-fastmcp>=2.0.0
-prometheus-client>=0.20.0
-PyJWT>=2.9.0
-cryptography>=42.0.0
-uvicorn[standard]>=0.30.0
-starlette>=0.40.0
+fastmcp>=4.0.3
+prometheus-client>=0.26.0
+PyJWT>=2.13.0
+cryptography>=50.0.1
+uvicorn[standard]>=0.52.4
+starlette>=1.6.0

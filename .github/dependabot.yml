@@ -2,6 +2,10 @@
 # Dependabot pull request costs a human approval. One grouped pull request per
 # ecosystem per month is a review; one per dependency per week is a rubber stamp.
 #
+# Majors are split into their own group. A single group holding everything means
+# one breaking major blocks every safe update behind it: nothing merges until the
+# breaking one is dealt with, including the updates that were fine.
+#
 # If the approval load ever feels like a chore, that is the signal this file is
 # wrong -- not the gate.
 
@@ -14,7 +18,11 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-    open-pull-requests-limit: 1
+        update-types: ["minor", "patch"]
+      actions-major:
+        patterns: ["*"]
+        update-types: ["major"]
+    open-pull-requests-limit: 2
 
   - package-ecosystem: pip
     directory: /
@@ -23,7 +31,11 @@ updates:
     groups:
       python:
         patterns: ["*"]
-    open-pull-requests-limit: 1
+        update-types: ["minor", "patch"]
+      python-major:
+        patterns: ["*"]
+        update-types: ["major"]
+    open-pull-requests-limit: 2
 
   - package-ecosystem: docker
     directories:
@@ -34,4 +46,8 @@ updates:
     groups:
       images:
         patterns: ["*"]
-    open-pull-requests-limit: 1
+        update-types: ["minor", "patch"]
+      images-major:
+        patterns: ["*"]
+        update-types: ["major"]
+    open-pull-requests-limit: 2

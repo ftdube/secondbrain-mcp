@@ -26,6 +26,10 @@ jobs:
       - uses: dorny/paths-filter@v4
         id: filter
         with:
+          # 'some' (the default) ORs the rules, so "**" alone matches everything and
+          # the negations below add matches instead of subtracting them. This is the
+          # quantifier that makes an exclusion actually exclude.
+          predicate-quantifier: 'some-with-excludes'
           filters: |
             code:
               - "**"

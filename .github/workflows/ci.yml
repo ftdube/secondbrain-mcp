@@ -30,6 +30,7 @@ jobs:
             code:
               - "**"
               - "!**/*.md"
+              - "!*.md"
               - "!vault-sample/**"
               - "!LICENSE"
 

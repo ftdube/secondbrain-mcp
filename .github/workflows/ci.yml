@@ -3,21 +3,39 @@ name: CI / CD
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "vault-sample/**"
-      - "LICENSE"
   pull_request:
-    paths-ignore:
-      - "**.md"
-      - "vault-sample/**"
-      - "LICENSE"
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/secondbrain-mcp
 
 jobs:
+  # Doc-only changes still need lint/test/scan to report — they are required
+  # checks — so the filtering happens here, per job, rather than at workflow
+  # level with paths-ignore.
+  #
+  # A job skipped by `if:` reports `skipped`, which SATISFIES a required check.
+  # A workflow that never runs reports nothing, and a required check that is
+  # never reported blocks the pull request forever. That is the difference, and
+  # it is why paths-ignore is wrong in a repository with required checks.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v4
+        id: filter
+        with:
+          filters: |
+            code:
+              - "**"
+              - "!**/*.md"
+              - "!vault-sample/**"
+              - "!LICENSE"
+
   lint:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container:
       image: python:3.12-slim
@@ -29,6 +47,8 @@ jobs:
       - run: ruff check server.py
 
   test:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     container:
       image: python:3.12-slim
@@ -41,6 +61,8 @@ jobs:
       - run: pytest tests/ -v
 
   scan:
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -54,7 +76,8 @@ jobs:
           severity: CRITICAL,HIGH
 
   build:
-    needs: [lint, test, scan]
+    needs: [changes, lint, test, scan]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -86,7 +109,8 @@ jobs:
           cache-to: type=gha,mode=max,scope=mcp
 
   build-push-sync:
-    needs: [scan]
+    needs: [changes, scan]
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read

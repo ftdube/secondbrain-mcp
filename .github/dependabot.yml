@@ -3,8 +3,8 @@
 # ecosystem per month is a review; one per dependency per week is a rubber stamp.
 #
 # Majors are split into their own group. A single group holding everything means
-# one breaking major blocks every safe update behind it -- which is exactly what
-# happened when TypeScript 7 arrived bundled with a tsx patch.
+# one breaking major blocks every safe update behind it: nothing merges until the
+# breaking one is dealt with, including the updates that were fine.
 #
 # If the approval load ever feels like a chore, that is the signal this file is
 # wrong -- not the gate.

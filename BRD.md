@@ -200,7 +200,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
-| NFR-COM-1 | The server SHALL expose no more than five MCP tools at a time; adding a sixth requires a deliberate, documented design decision, since each tool definition costs ~250 tokens of every session's context and token minimization is this project's core value proposition (§2, G3). | Must | Implemented (`agents.md` hard rule; regression-tested as of v1.6 — `test_exactly_five_tools_registered`) |
+| NFR-COM-1 | The server SHALL expose no more than five MCP tools at a time; adding a sixth requires a deliberate, documented design decision, since each tool definition costs ~250 tokens of every session's context and token minimization is this project's core value proposition (§2, G3). | Must | Implemented (`AGENTS.md` hard rule; regression-tested as of v1.6 — `test_exactly_five_tools_registered`) |
 | NFR-COM-2 | `server.py` SHALL write only to `DB_PATH`, `OUTBOX_PATH`, and `/tmp`, remaining compatible with `readOnlyRootFilesystem: true`. | Must | Implemented |
 | NFR-COM-3 | `server.py` SHALL contain no `git` subprocess calls or git library usage. | Must | Implemented |
 | NFR-COM-4 | Every tool call SHALL increment a dedicated Prometheus counter `mcp_<tool>_total`, scraped from `/metrics` without authentication. | Must | Implemented |
@@ -345,7 +345,7 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
 | NFR-AUTH-1 | The server SHALL NOT implement its own credential store, session mechanism, or password handling; identity is wholly delegated to Dex. | Must | Implemented |
-| NFR-AUTH-2 | JWKS signing keys SHALL be cached in-process (`cache_keys=True`); a Dex key rotation is only picked up on the next process restart. Documented limitation, not a defect. | Must | Implemented (documented in `agents.md`; caching mechanism regression-tested as of v1.6 — `test_jwks_client_is_cached_across_calls`) |
+| NFR-AUTH-2 | JWKS signing keys SHALL be cached in-process (`cache_keys=True`); a Dex key rotation is only picked up on the next process restart. Documented limitation, not a defect. | Must | Implemented (documented in `AGENTS.md`; caching mechanism regression-tested as of v1.6 — `test_jwks_client_is_cached_across_calls`) |
 | NFR-AUTH-3 | OIDC discovery SHALL be skipped entirely; `DEX_JWKS_URI` SHALL point directly at the in-cluster JWKS endpoint, because the deployment's edge network blocks in-cluster requests to the public Dex hostname (A4). | Must | Implemented |
 | NFR-AUTH-4 | Only OAuth 2.1 with PKCE SHALL be supported for the Claude.ai client; static long-lived bearer tokens are out of scope (C3). | Must | Implemented |
 | NFR-AUTH-5 | Any path not explicitly in `AUTH_PUBLIC` SHALL default to requiring authentication (allowlist, not denylist). | Must | Implemented |
@@ -460,7 +460,7 @@ This section consolidates and cross-references §9.2 and §9.8; only requirement
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
 | NFR-SEC-1 | The system SHALL NOT bulk-replicate vault content off the self-hosted environment; only per-call tool results (bounded by FR-SRCH-2 and, as of document v1.4, FR-READ-4) leave the environment boundary. | Must | Implemented (core privacy claim, §2) |
-| NFR-SEC-2 | Secrets (the push-sync SSH deploy key) SHALL be mounted with `defaultMode: 0400`; the default Kubernetes Secret volume mode (`0644`, world-readable) is rejected by SSH and MUST NOT be relied upon. | Must | Implemented (documented gotcha, `agents.md`) |
+| NFR-SEC-2 | Secrets (the push-sync SSH deploy key) SHALL be mounted with `defaultMode: 0400`; the default Kubernetes Secret volume mode (`0644`, world-readable) is rejected by SSH and MUST NOT be relied upon. | Must | Implemented (documented gotcha, `AGENTS.md`) |
 | NFR-SEC-3 | No secret material SHALL be committed to this repository; `.env.example` SHALL contain placeholders only. | Must | Implemented |
 | NFR-SEC-4 | See FR-COM-1 / NFR-PROP-6 for path-traversal and symlink-escape rejection, applied uniformly to every tool that accepts a vault path. | Must | Implemented |
 | NFR-SEC-5 | See §9.8 in full for authentication requirements; see NFR-AUTH-7 for the accepted authorization gap. | Must | Implemented (with documented gap) |
@@ -484,7 +484,7 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 
 - **Token budget:** tool-schema overhead SHALL stay ≤ ~3.5k tokens/session (five tools), against a generic-filesystem-MCP baseline of ~10k tokens (G3).
 - **Search quality gate:** rolling 7-day `mcp_search_misses_total / mcp_searches_total` SHALL stay ≤ 20%; crossing this threshold is the sole documented trigger for starting Phase 1b work (out of scope for this revision).
-- **Acceptance criteria for v1.1.0:** every FR/NFR row in §9.7 (`propose_edit`) and the multi-file addition in particular (FR-PROP-8, NFR-PROP-8, NFR-PROP-9) has a passing automated regression test (§9.1's traceability requirement); `ruff` reports no new lint findings versus the pre-`propose_edit` baseline; the model-free-apply gate (NFR-PROP-5) is codified in `agents.md`, not merely in this document.
+- **Acceptance criteria for v1.1.0:** every FR/NFR row in §9.7 (`propose_edit`) and the multi-file addition in particular (FR-PROP-8, NFR-PROP-8, NFR-PROP-9) has a passing automated regression test (§9.1's traceability requirement); `ruff` reports no new lint findings versus the pre-`propose_edit` baseline; the model-free-apply gate (NFR-PROP-5) is codified in `AGENTS.md`, not merely in this document.
 
 ## 15. Appendices
 

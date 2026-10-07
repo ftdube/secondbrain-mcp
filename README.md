@@ -46,7 +46,7 @@ make proposals VAULT_REPO=/path/to/your/vault/clone        # dry-run: CLEAN vs S
 make apply-proposals VAULT_REPO=/path/to/your/vault/clone  # git apply --3way, then delete applied patches
 ```
 
-A stale proposal (the note drifted since drafting) is skipped, never force-applied or written with conflict markers. Applied edits land in the working tree uncommitted — review in Obsidian, then commit. See `agents.md` for the hard rule: applying a proposal is a command, never a conversation.
+A stale proposal (the note drifted since drafting) is skipped, never force-applied or written with conflict markers. Applied edits land in the working tree uncommitted — review in Obsidian, then commit. See `AGENTS.md` for the hard rule: applying a proposal is a command, never a conversation.
 
 ## Running locally
 

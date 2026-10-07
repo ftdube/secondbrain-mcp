@@ -16,8 +16,8 @@ From an empty workstation to a running server. This repository holds the server,
 ## Workstation
 
 1. Clone the repository.
-2. `pip install -r requirements.txt -r requirements-dev.txt`, then `pytest tests/` — the same checks CI runs. Python must match the `Dockerfile`'s version (`scripts/ci-python-matches-dockerfile.sh`).
-3. Run locally: [README, "Running locally"](README.md#running-locally). Environment variables: [README](README.md#environment-variables) and `.env.example`; `compose.yaml` is authoritative for the sidecars'.
+2. `pip install -r requirements.txt -r requirements-dev.txt`, then `ruff check server.py` and `pytest tests/` — the lint and tests CI runs. Python must match the `Dockerfile`'s version (`scripts/ci-python-matches-dockerfile.sh`).
+3. Run locally: [README, "Running locally"](README.md#running-locally). Environment variables: [README](README.md#environment-variables) and `.env.example`; `compose.yaml` is authoritative for the sidecars' variables.
 
 ## Deploy
 

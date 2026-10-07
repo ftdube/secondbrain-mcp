@@ -5,12 +5,12 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.13 (Draft) |
+| Document version | 1.14 (Draft) |
 | System / API version documented | 1.3.1 |
-| Date | 2026-08-23 |
+| Date | 2026-10-07 |
 | Author | Claude Code, on behalf of the repository owner |
 | Classification | Public (repository is open-source; see §6 for redaction policy) |
-| Related artifacts | [`agents.md`](agents.md), [`RISKS.md`](RISKS.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md), [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) |
+| Related artifacts | [`AGENTS.md`](AGENTS.md), [`REBUILD.md`](REBUILD.md), [`RISKS.md`](RISKS.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md), [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) |
 
 ### Revision History
 
@@ -30,6 +30,7 @@
 | 1.11 | 2026-08-23 | Gap audit on the v1.10 work. Found and fixed a real corruption bug: added NFR-PROP-11 — a create-target drifted (independently created) between drafting and applying was silently 3-way-merged with `<<<<<<<` conflict markers written to disk while `check()` reported clean, because a create's `/dev/null` base doesn't need the historical-blob lookup that NFR-PROP-9's dummy hash blocks for edits; fixed in `apply_proposals.py` with an explicit existence pre-check. Also closed traceability gaps: tagged two untagged-but-already-covered tests (FR-NOTE-4, NFR-NOTE-4) and added NFR-COM-4/NFR-SRCH-1/NFR-SRCH-5/NFR-SEC-1..6 to the §9.1 excused list as pre-existing architectural facts. System version → 1.3.1 (bug fix, no tool contract change). |
 | 1.12 | 2026-08-25 | Comparative gap audit against the sibling `vault-publisher` repo's BRD (same operator, same self-hosted cluster), requested to check for portable security/monitoring/uptime requirements. Added new §9.11 (OBS): FR-OBS-1 (`/health` readiness signal) and NFR-OBS-1 (reindex-staleness gauge), both Not implemented, tracked as [issue #59](https://github.com/ftdube/secondbrain-mcp/issues/59)/[#60](https://github.com/ftdube/secondbrain-mcp/issues/60); NFR-OBS-2 (RAM bound, Could) tracked as [issue #61](https://github.com/ftdube/secondbrain-mcp/issues/61). Added NFR-SEC-7 (§12) — `git-sync` currently shares `push-sync`'s read-write SSH key (`compose.yaml`, documented in `README.md`), giving the read-only sidecar unnecessary write credentials; Not implemented, tracked as [issue #58](https://github.com/ftdube/secondbrain-mcp/issues/58) and `RISKS.md` RISK-11. No system-version bump — documentation and backlog only, no code changed. |
 | 1.13 | 2026-08-26 | Implemented NFR-SEC-7 (issue #58): `git-sync` now uses a separate read-only SSH key via `GITSYNC_SSH_KEY_PATH`. Updated `README.md` with key generation instructions. |
+| 1.14 | 2026-10-07 | `agents.md` renamed `AGENTS.md` (its `claude.md`/`gemini.md` symlinks removed); `REBUILD.md` added. No requirement changed. |
 
 Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 
@@ -317,7 +318,7 @@ This is the most recently added, and most heavily specified, tool. Its requireme
 | NFR-PROP-2 (N2) | No step in this pipeline SHALL mutate the live vault tree or perform a destructive revert from within the MCP server process. | Must | Implemented |
 | NFR-PROP-3 (N3) | The diff SHALL apply cleanly via `git apply --3way` when its target region is unchanged since drafting, and SHALL be rejected cleanly (non-zero exit, no mutation, no conflict markers) — never silently merged — when the target region has drifted. *Refined by NFR-PROP-9.* | Must | Implemented |
 | NFR-PROP-4 (N4) | Token cost SHALL be bounded to one tool definition (~250 tokens/session); the outbox → push-sync transport is reused verbatim. | Must | Implemented |
-| NFR-PROP-5 (N5) | Applying a proposal SHALL consume zero model tokens — a plain script invocation, never a reasoning turn. `agents.md` codifies this as a hard rule. | Must | Implemented |
+| NFR-PROP-5 (N5) | Applying a proposal SHALL consume zero model tokens — a plain script invocation, never a reasoning turn. `AGENTS.md` codifies this as a hard rule. | Must | Implemented |
 | NFR-PROP-6 (N6) | All target paths SHALL be resolved per FR-COM-1 (traversal/symlink-safe). | Must | Implemented |
 | NFR-PROP-7 (N7) | No full-vault replication or additional off-box copy SHALL be introduced by this feature. | Must | Implemented |
 | NFR-PROP-8 (N8, new) | Multi-file atomicity (FR-PROP-8) SHALL be enforced at the application level: `apply_proposals.py` SHALL always run a full-patch dry-run `check()` before `apply_one()`, and skip the real apply entirely on any check failure. `git apply` itself does **not** guarantee cross-file atomicity within one patch — verified: a bare `git apply --3way` on a patch with one drifted file among several mutates the earlier, non-drifted files before failing on the later one. | Must | Implemented; regression-tested |
@@ -489,7 +490,7 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 
 ### Appendix A — Related Documents
 
-- [`agents.md`](agents.md) — hard rules and non-obvious operational gotchas (token-budget-constrained, kept minimal by design; this document is the expanded, unconstrained counterpart)
+- [`AGENTS.md`](AGENTS.md) — hard rules and non-obvious operational gotchas (token-budget-constrained, kept minimal by design; this document is the expanded, unconstrained counterpart)
 - [`RISKS.md`](RISKS.md) — risk register (extracted from this document's former §14 in v1.9)
 - [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) — open gaps and the prioritized backlog (moved out of this document's former §17 in v1.9); resolved gaps are closed issues linked to the PR that fixed them, not deleted
 - [`README.md`](README.md) — user-facing setup and architecture summary

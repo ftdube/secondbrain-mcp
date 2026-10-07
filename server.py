@@ -14,7 +14,7 @@ Vault: mounted at VAULT_PATH (populated by a git-sync sidecar).
 Inbox: notes written to OUTBOX_PATH; push-sync sidecar commits and pushes them.
 Proposals: propose_edit also writes to OUTBOX_PATH (as *.patch.md); push-sync
 routes those to Proposals/ instead of Inbox/. Applied out of band via
-scripts/apply_proposals.py — never by a model. See agents.md.
+scripts/apply_proposals.py — never by a model. See AGENTS.md.
 Blacklist: VAULT_BLACKLIST (comma-separated vault-relative directory prefixes)
 excludes matching notes from indexing, read_note, and propose_edit.
 """
@@ -280,7 +280,7 @@ def _make_diff(rel_path: str, old: str, new: str, is_new: bool = False) -> str:
     # attempt a genuine content merge — which can silently succeed with
     # conflict markers written into the note (and `--check` reports that as
     # clean). The dummy id forces apply to fall back to plain context
-    # matching, so any drift is rejected cleanly instead of merged. See agents.md.
+    # matching, so any drift is rejected cleanly instead of merged. See AGENTS.md.
     hunk = "".join(difflib.unified_diff(
         old.splitlines(keepends=True),
         new.splitlines(keepends=True),

@@ -165,7 +165,7 @@ def test_oauth_protected_resource_metadata():
     }
 
 
-# BRD: OI-5 (pins the exact MCP transport mount path, which is fastmcp-version-dependent — see agents.md)
+# BRD: OI-5 (pins the exact MCP transport mount path, which is fastmcp-version-dependent — see the http_app() comment in server.py)
 def test_mcp_asgi_mounted_at_expected_path():
     paths = [route.path for route in server.mcp_asgi.routes]
     assert "/mcp" in paths

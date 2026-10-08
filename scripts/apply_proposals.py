@@ -2,7 +2,7 @@
 """
 Apply propose_edit patches from a vault's Proposals/ queue.
 
-Model-free by design (see agents.md): run from a terminal, cron, or `make` —
+Model-free by design (see AGENTS.md): run from a terminal, cron, or `make` —
 never inside a Claude Code session. Claude Code must invoke this script, not
 read or reason about the patch files itself.
 

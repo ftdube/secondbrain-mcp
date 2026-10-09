@@ -9,7 +9,8 @@ env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/secondbrain-mcp
 
 jobs:
-  # Every commit, docs included, so it never takes the `changes` gate.
+  # Every pull request and push to main, docs-only included, so it never takes
+  # the `changes` gate. A fork branch is scanned once its pull request opens.
   secrets:
     runs-on: ubuntu-latest
     steps:

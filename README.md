@@ -149,6 +149,10 @@ Claude.ai mobile requires OAuth 2.1 with PKCE — static bearer tokens are not s
 
 The Claude.ai redirect URI (`https://claude.ai/api/mcp/auth_callback`) must be registered in the Dex static client config.
 
+## Contributing
+
+Branch, secrets and documentation conventions: [`AGENTS.md`](AGENTS.md#contributing).
+
 ## License
 
 MIT

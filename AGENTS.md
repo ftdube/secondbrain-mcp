@@ -28,3 +28,15 @@ Self-hosted MCP server giving Claude mobile access to an Obsidian vault via 5 to
 - push-sync keeps its own `git clone` of the vault repo, not the git-sync volume, and pulls before each push
 - K8s Secret volumes default to `0644`, which SSH rejects: mount the push-sync key with `defaultMode: 0400` (NFR-SEC-2)
 - `VAULT_BLACKLIST` is enforced only in `_resolve_in_vault` and matches by path segment, with leading slashes stripped (FR-BLK-4) — a privacy control, so a silent non-match is the failure to fear
+
+## Contributing
+
+What an outside contributor must follow that CI does not enforce:
+
+- Branch from `main` as `feature/<name>`, `fix/<name>` or `docs/<name>`, then open a pull request.
+- Never commit secrets. CI's `secrets` job scans all of history, but by then a pushed secret is already public: rotate it, since rewriting history does not take it back.
+- No personal identifiers (domains, hostnames, usernames, emails, IPs) or personal infrastructure in any file; deployment specifics arrive through environment variables.
+- Requirements and their rationale go in [`BRD.md`](BRD.md), risks in [`RISKS.md`](RISKS.md), deferred work in [`next-steps.md`](next-steps.md) with the condition that triggers it, and the backlog in GitHub Issues.
+- One-time setup goes in [`REBUILD.md`](REBUILD.md). This file holds only hard rules and non-obvious gotchas, under 1,600 tokens (words × 1.33).
+- Each fact lives in one file; link to it rather than copying it.
+- Code comments only when the why is non-obvious; no multi-line docstrings.

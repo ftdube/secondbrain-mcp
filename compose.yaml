@@ -27,6 +27,11 @@ services:
       GITSYNC_PERIOD: 5m
       GITSYNC_SSH_KEY_FILE: /ssh/id_ed25519
       GITSYNC_SSH_KNOWN_HOSTS: "false"
+      # Bind-mounted dirs, including git-sync's own worktrees, can look foreign-owned
+      # (Docker Desktop shows root); git-sync v4.8 no longer sets safe.directory=*.
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: "*"
     volumes:
       - ${VAULT_PATH:-./vault-sample}:/vault
       - ${GITSYNC_SSH_KEY_PATH:-~/.ssh/git_sync_ed25519}:/ssh/id_ed25519:ro

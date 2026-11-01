@@ -28,7 +28,7 @@ import re
 import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import uvicorn
@@ -266,7 +266,7 @@ def note(title: str, content: str) -> str:
         filename = _note_filename(title)
         dest = OUTBOX_PATH / filename
         if dest.exists():
-            filename = f"{filename[:-3]}-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.md"
+            filename = f"{filename[:-3]}-{datetime.now(UTC).strftime('%Y%m%d-%H%M%S')}.md"
             dest = OUTBOX_PATH / filename
         dest.write_text(f"# {title}\n\n{content}\n")
         return f"Saved to inbox: {filename}"
@@ -360,7 +360,7 @@ def propose_edit(edits: list[dict[str, str]], rationale: str) -> str:
         if dest.exists():
             return f"Already proposed (unchanged): {filename}"
         header = ", ".join(rel_paths)
-        drafted = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        drafted = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
         dest.write_text(f"# Proposed edit: {header}\n\nDrafted: {drafted}\n\n{rationale}\n\n```diff\n{diff}```\n")
         return f"Proposed: {filename}"
     except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise

@@ -18,7 +18,7 @@ services:
       - mcp-outbox:/outbox
 
   git-sync:
-    image: registry.k8s.io/git-sync/git-sync:v4.4.1@sha256:699b654e373f000c356756c24290a6dbb86500934b65ce6093fd92c434c61c6b
+    image: registry.k8s.io/git-sync/git-sync:v4.8.0@sha256:a20644562fba94773e594885cb001aadb5a3172175f13ac1215e5b2033c9200e
     environment:
       GITSYNC_REPO: ${GIT_REPO_URL:-}
       GITSYNC_ROOT: /vault
@@ -27,6 +27,14 @@ services:
       GITSYNC_PERIOD: 5m
       GITSYNC_SSH_KEY_FILE: /ssh/id_ed25519
       GITSYNC_SSH_KNOWN_HOSTS: "false"
+      # Bind-mounted dirs, including git-sync's own worktrees, can look foreign-owned
+      # (Docker Desktop shows root); git-sync v4.8 no longer sets safe.directory=*.
+      # Trust only the root and what's under it.
+      GIT_CONFIG_COUNT: "2"
+      GIT_CONFIG_KEY_0: safe.directory
+      GIT_CONFIG_VALUE_0: /vault
+      GIT_CONFIG_KEY_1: safe.directory
+      GIT_CONFIG_VALUE_1: /vault/*
     volumes:
       - ${VAULT_PATH:-./vault-sample}:/vault
       - ${GITSYNC_SSH_KEY_PATH:-~/.ssh/git_sync_ed25519}:/ssh/id_ed25519:ro

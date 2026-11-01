@@ -12,6 +12,7 @@ From an empty workstation to a running server. This repository holds the server,
 | A read-only deploy key | git-sync (NFR-SEC-7) | Generated per [README](README.md#sidecars); `GITSYNC_SSH_KEY_PATH` |
 | A read-write deploy key | push-sync | Your git host; `SSH_KEY_PATH` |
 | An OIDC issuer (Dex) with a client for this server | Auth (BRD §9.8) | `DEX_ISSUER`, `MCP_CLIENT_ID` |
+| The Renovate GitHub App (Mend-hosted), and read access to the public preset `renovate.json` extends | Dependency update pull requests; not needed to build or run | The repository owner's GitHub account; install the app only once `renovate.json` is on `main`, or it opens an onboarding pull request with its own default config |
 
 ## Workstation
 

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "This repository's rules on top of the shared policy. One updater per ecosystem: this replaced .github/dependabot.yml.",
+  "extends": [
+    "github>ftdube/renovate-config"
+  ],
+  "packageRules": [
+    {
+      "description": "The Dockerfile and CI's lint and test containers run one Python (scripts/ci-python-matches-dockerfile.sh), so the image moves in one PR across both managers",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "digest",
+        "pin",
+        "pinDigest"
+      ],
+      "groupName": "python image"
+    },
+    {
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "python"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "python image-major"
+    }
+  ]
+}

@@ -78,7 +78,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 
 ## 4. Scope
 
-### 4.1 In Scope (system version 1.3.1 — see §11.3 for the version history)
+### 4.1 In Scope (system version 1.4.0 — see §11.3 for the version history)
 
 - Five MCP tools: `get_overview`, `search`, `read_note`, `note`, `propose_edit`.
 - FTS5 (SQLite) keyword search over the vault, chunked at heading boundaries.
@@ -237,7 +237,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 | FR-SRCH-3 | Each result SHALL surface the note's vault-relative path, the heading of the containing chunk, and a ~64-token snippet of the body with the match ellipsized (`…`). | Must | Implemented |
 | FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase, any double quote inside it doubled. | Must | Implemented |
 | FR-SRCH-5 | If zero rows match after any retry, the tool SHALL return the literal string `"No results."`. | Must | Implemented |
-| FR-SRCH-6 | If fewer than 10 rows match the query as given, the tool SHALL fill the remaining places with rows matching **any** of its words, ordered by `rank` and never repeating a row. Words are quoted so none reads as FTS5 syntax; common words ("how", "is", "the") are dropped unless nothing else is left. | Must | Implemented |
+| FR-SRCH-6 | If fewer than 10 rows match the query as given, the tool SHALL fill the remaining places with rows matching **any** of its words, ordered by `rank`, never repeating a row, and listed after a marker line so they are not mistaken for exact matches. Words are quoted so none reads as FTS5 syntax; common words ("how", "is", "the") are dropped unless nothing else is left. A query that parses as FTS5 and uses its syntax (a phrase, `*`, `^`, a column filter, grouping, `AND`/`OR`/`NOT`/`NEAR`) is not filled: the caller asked for exactly that. | Must | Implemented |
 | FR-SRCH-7 | With `SEARCH_LOG_QUERIES=1`, each call SHALL log its query, result count and whether FR-SRCH-6 alone answered it, at INFO. Unset, no query text is logged: a query can reveal as much as the note it looks for. | Should | Implemented |
 
 **Non-Functional**
@@ -413,7 +413,7 @@ Added in document v1.12, following a comparative gap audit against the sibling `
 
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
-| NFR-OBS-1 | The server SHALL expose a gauge metric (e.g. `mcp_last_reindex_timestamp_seconds`) recording the Unix timestamp of the last successful index build, so an abnormally large gap (git-sync outage, expired deploy key, vault-watcher crash) is visible to Prometheus/alerting rather than silently degrading `NFR-COM-5`'s freshness bound indefinitely — the same proactive-alert pattern `NFR-SRCH-3` already uses for search miss-rate. | Should | Not implemented — see [issue #60](https://github.com/ftdube/secondbrain-mcp/issues/60), `RISKS.md` RISK-13 |
+| NFR-OBS-1 | The server SHALL expose a gauge metric (e.g. `mcp_last_reindex_timestamp_seconds`) recording the Unix timestamp of the last successful index build, so an abnormally large gap (git-sync outage, expired deploy key, vault-watcher crash) is visible to Prometheus/alerting rather than silently degrading `NFR-COM-5`'s freshness bound indefinitely — the proactive-alert pattern a metric makes possible. | Should | Not implemented — see [issue #60](https://github.com/ftdube/secondbrain-mcp/issues/60), `RISKS.md` RISK-13 |
 | NFR-OBS-2 | Idle resident RAM SHOULD stay under 150 MB and peak RAM during a full reindex SHOULD stay under 500 MB — headroom around `G6`'s ~80 MB observed target, not a change to it. The Kubernetes Deployment SHOULD declare matching `resources.requests`/`resources.limits` once this service's own manifests exist, so an unbounded pod cannot starve neighbors on the same constrained cluster (compare `vault-publisher` BRD.md NFR-POLL-1/NFR-BUILD-1, motivated by the same RPi5 4GB cluster and its prior real starvation problem, §2 there). | Could | Not implemented — see [issue #61](https://github.com/ftdube/secondbrain-mcp/issues/61), `RISKS.md` RISK-14 |
 
 ## 10. Data Requirements
@@ -421,7 +421,7 @@ Added in document v1.12, following a comparative gap audit against the sibling `
 | Data | Location | Format | Notes |
 |---|---|---|---|
 | Vault notes | Effective vault root, recursive | Markdown, UTF-8 (decoded with `errors="replace"`) | Directories named `Chat Archive` are excluded from the FTS5 index only — still readable via `read_note`/`propose_edit`. `VAULT_BLACKLIST` entries (§9.10) are excluded from *both* indexing and `read_note`/`propose_edit` — an actual access-control boundary, not just an indexing exclusion |
-| FTS5 index | `DB_PATH` (SQLite file) | `chunks_fts(path UNINDEXED, heading, body)`, `porter unicode61` tokenizer | Rebuilt wholesale (`DROP` + `CREATE` + full re-scan) on every (re)index; not incremental |
+| FTS5 index | `DB_PATH` (SQLite file) | `chunks_fts(path UNINDEXED, title, heading, body)`, `porter unicode61` tokenizer | Rebuilt wholesale (`DROP` + `CREATE` + full re-scan) on every (re)index, including at startup when the vault is not yet mounted, so an index left by an older schema never survives a deploy; not incremental |
 | Outbox artifacts | `OUTBOX_PATH` | `*.md` (notes) or `*.patch.md` (proposals) | Transient — removed from the outbox once push-sync has committed and pushed them. If push-sync crashes or upstream git push fails consistently, artifacts will accumulate; an alert SHOULD trigger on excessive outbox age (e.g. >1hr) to avoid unbounded buildup (see NFR-NOTE-5). |
 | Proposals queue | `Proposals/` in the vault git repo | `*.patch.md`: rationale header + fenced git diff | Removed by `scripts/apply_proposals.py` on successful apply; left in place (never partially consumed) when stale |
 
@@ -453,7 +453,7 @@ This service's HTTP surface is a mix of (a) fixed-convention operational endpoin
 | MCP tool surface (`tools/list` / `tools/call`) | **Versioned per-tool, additively.** Adding a tool (like `propose_edit` in this revision) is a MINOR bump. A breaking change to an existing tool's arguments or return contract would ship as a **new tool name** (e.g. `propose_edit_v2`) rather than mutate the existing contract, so already-deployed clients never silently break. | MCP has no native URL-path versioning; the tool name *is* the addressable unit. |
 | This document | **Semantic versioning via the "System / API version documented" field in Document Control.** MAJOR for any breaking tool contract change or tool removal; MINOR for an additive tool or field; PATCH for description/documentation fixes with no behavior change. | Gives operators and reviewers a single number to diff against when the service changes. |
 
-Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior); **v1.3.0** lets `propose_edit` create new files (FR-PROP-6/9), additive; **v1.3.1** — current — is a bug fix only (NFR-PROP-11), no tool contract change. No existing tool's contract changed in any of these bumps. §9.11's new requirements (document v1.12) are not yet implemented and have not moved this number.
+Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior); **v1.3.0** lets `propose_edit` create new files (FR-PROP-6/9), additive; **v1.3.1** is a bug fix only (NFR-PROP-11), no tool contract change; **v1.4.0** — current — widens `search` with marked partial matches (FR-SRCH-6), its argument unchanged and its result still an excerpt list. No existing tool's arguments changed in any of these bumps. §9.11's new requirements (document v1.12) are not yet implemented and have not moved this number.
 
 Separately, the **MCP protocol version** itself (negotiated during the `initialize` handshake, e.g. a dated string such as `2025-06-18`) is orthogonal to this service's own version number and is determined by the installed `fastmcp`/MCP SDK version, not by this document — the two SHOULD NOT be conflated in future revisions.
 

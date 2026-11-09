@@ -119,7 +119,7 @@ def build_index(vault_path: Path, db_path: Path) -> int:
     if not effective.exists():
         effective = vault_path
     rows: list[tuple[str, str, str, str]] = []
-    for md in sorted(effective.rglob("*.md")):
+    for md in sorted(effective.rglob("*.md")) if effective.exists() else []:
         rel_path = md.relative_to(effective)
         rel = str(rel_path)
         if "Chat Archive" in rel:
@@ -214,6 +214,13 @@ _SEARCH_SQL = """
 """
 
 
+# FTS5 syntax a caller wrote on purpose: a phrase, prefix, boost, column filter,
+# grouping or operator (operators are case-sensitive in FTS5, so "and" is a word).
+_FTS_SYNTAX = re.compile(r'["*^():]|\b(?:AND|OR|NOT|NEAR)\b')
+
+PARTIAL_MARKER = "_Partial matches — some of the words:_"
+
+
 def _any_term(query: str) -> str | None:
     """FR-SRCH-6: the query's words, each quoted so none reads as FTS5 syntax, joined
     with OR. Stopwords are dropped unless nothing else is left. bm25 still ranks a
@@ -231,31 +238,36 @@ def search(query: str) -> str:
         with SEARCH_SECONDS.time():
             conn = sqlite3.connect(DB_PATH)
             try:
+                plain = not _FTS_SYNTAX.search(query)
                 try:
                     rows = conn.execute(_SEARCH_SQL, (query, SEARCH_LIMIT)).fetchall()
                 except sqlite3.OperationalError:
+                    plain = True  # not valid syntax, so not syntax the caller meant
                     # FR-SRCH-4: FTS5 syntax error -- retry as a quoted phrase. Inner quotes
                     # are doubled, or a query containing one fails the retry as well.
                     phrase = '"' + query.replace('"', '""') + '"'
                     rows = conn.execute(_SEARCH_SQL, (phrase, SEARCH_LIMIT)).fetchall()
-                widened = False
-                broad = _any_term(query)
+                extra = []
+                broad = _any_term(query) if plain else None
                 if len(rows) < SEARCH_LIMIT and broad:
                     seen = {r[0] for r in rows}
                     extra = [r for r in conn.execute(_SEARCH_SQL, (broad, SEARCH_LIMIT * 2)).fetchall()
-                             if r[0] not in seen]
-                    widened = not rows and bool(extra)
-                    rows += extra[: SEARCH_LIMIT - len(rows)]
+                             if r[0] not in seen][: SEARCH_LIMIT - len(rows)]
+                widened = not rows and bool(extra)
             finally:
                 conn.close()
         if widened:
             SEARCH_WIDENED.inc()
         if SEARCH_LOG_QUERIES:
-            log.info("search query=%r results=%d widened=%s", query, len(rows), widened)
-        if not rows:
+            log.info("search query=%r results=%d widened=%s", query, len(rows) + len(extra), widened)
+        if not rows and not extra:
             SEARCH_MISSES.inc()
             return "No results."
-        result = "\n\n".join(f"**{r[1]}** — {r[2]}\n{r[3]}" for r in rows)
+        # FR-SRCH-6: partial matches are marked, so a caller can tell them from exact ones.
+        blocks = [f"**{r[1]}** — {r[2]}\n{r[3]}" for r in rows]
+        if extra:
+            blocks += [PARTIAL_MARKER] + [f"**{r[1]}** — {r[2]}\n{r[3]}" for r in extra]
+        result = "\n\n".join(blocks)
         SEARCH_CHARS.inc(len(result))
         return result
     except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
@@ -490,10 +502,11 @@ async def _vault_watcher() -> None:
 @asynccontextmanager
 async def _lifespan(app: Starlette) -> AsyncIterator[None]:
     async with mcp_asgi.lifespan(app):
-        if VAULT_PATH.exists():
-            build_index(VAULT_PATH, DB_PATH)
-        else:
+        if not VAULT_PATH.exists():
             log.warning("vault not mounted at startup; index empty until first sync")
+        # Unconditional: a persisted DB_PATH may hold an older schema, which search's
+        # column indexes would not fit. An empty index is better than an erroring one.
+        build_index(VAULT_PATH, DB_PATH)
         asyncio.create_task(_vault_watcher())
         yield
 

@@ -161,6 +161,7 @@ def test_search_plain_language_question_widens(tmp_path, monkeypatch):
     before = _value(server.SEARCH_WIDENED)
     result = server.search("how is ollama updated on the gpu host")
     assert _paths(result) == ["inference.md"]
+    assert result.startswith(server.PARTIAL_MARKER)
     assert _value(server.SEARCH_WIDENED) == before + 1
 
 
@@ -173,9 +174,12 @@ def test_search_all_terms_rank_before_any_term(tmp_path, monkeypatch):
     })
     monkeypatch.setattr(server, "DB_PATH", db)
     before = _value(server.SEARCH_WIDENED)
-    paths = _paths(server.search("alpha beta"))
+    result = server.search("alpha beta")
+    paths = _paths(result)
     assert paths[0] == "both.md"
     assert sorted(paths[1:]) == ["one.md", "other.md"]
+    exact, partial = result.split(server.PARTIAL_MARKER)
+    assert _paths(exact) == ["both.md"]
     assert _value(server.SEARCH_WIDENED) == before  # an all-terms hit existed
 
 
@@ -185,6 +189,28 @@ def test_search_stopword_only_query_still_searches(tmp_path, monkeypatch):
     db = _indexed_vault(tmp_path, {"note.md": "what"})
     monkeypatch.setattr(server, "DB_PATH", db)
     assert _paths(server.search("what is it")) == ["note.md"]
+
+
+# BRD: FR-SRCH-6
+def test_search_respects_explicit_fts_syntax(tmp_path, monkeypatch):
+    # A caller who wrote NOT, a phrase or a column filter asked for exactly that;
+    # filling with any-word matches would hand back what they excluded.
+    db = _indexed_vault(tmp_path, {"keep.md": "alpha", "drop.md": "alpha beta", "phrase.md": "beta alpha"})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    assert _paths(server.search("alpha NOT beta")) == ["keep.md"]
+    assert _paths(server.search('"alpha beta"')) == ["drop.md"]
+    assert server.PARTIAL_MARKER not in server.search('"alpha beta"')
+
+
+# BRD: FR-SRCH-1
+def test_build_index_without_vault_replaces_old_schema(tmp_path):
+    db = tmp_path / "index.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE VIRTUAL TABLE chunks_fts USING fts5(path UNINDEXED, heading, body)")
+    conn.close()
+    assert server.build_index(tmp_path / "absent", db) == 0
+    cols = [r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(chunks_fts)")]
+    assert cols == ["path", "title", "heading", "body"]
 
 
 # BRD: FR-SRCH-1

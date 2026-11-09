@@ -168,6 +168,15 @@ NOTE_COUNTER    = Counter("mcp_notes_total",            "Total note tool calls")
 PROPOSE_COUNTER = Counter("mcp_propose_edits_total",    "Total propose_edit tool calls")
 
 
+def _vault_ready() -> bool:
+    """git-sync's vault/ link exists, or (local dev) VAULT_PATH itself holds notes."""
+    # The mount exists before git-sync links it; indexing then reads an empty or
+    # half-written tree and replaces a good persisted index with nothing.
+    if (VAULT_PATH / "vault").exists():
+        return True
+    return VAULT_PATH.is_dir() and any(VAULT_PATH.glob("*.md"))
+
+
 def _effective_vault() -> Path:
     return VAULT_PATH / "vault" if (VAULT_PATH / "vault").exists() else VAULT_PATH
 
@@ -516,12 +525,13 @@ async def _vault_watcher() -> None:
 @asynccontextmanager
 async def _lifespan(app: Starlette) -> AsyncIterator[None]:
     async with mcp_asgi.lifespan(app):
-        if VAULT_PATH.exists() or not _index_current(DB_PATH):
+        ready = _vault_ready()
+        if ready or not _index_current(DB_PATH):
             # Without a vault this builds an empty index: better than an older schema
             # search's column indexes would not fit.
             build_index(VAULT_PATH, DB_PATH)
-        if not VAULT_PATH.exists():
-            log.warning("vault not mounted at startup; serving the persisted index until first sync")
+        if not ready:
+            log.warning("vault not ready at startup; serving the persisted index until first sync")
         asyncio.create_task(_vault_watcher())
         yield
 

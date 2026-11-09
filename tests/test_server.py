@@ -214,6 +214,25 @@ def test_build_index_without_vault_replaces_old_schema(tmp_path):
 
 
 # BRD: FR-SRCH-1
+def test_vault_ready_waits_for_git_sync_link(tmp_path, monkeypatch):
+    mount = tmp_path / "mount"
+    (mount / ".git-sync" / "abc").mkdir(parents=True)
+    (mount / ".git-sync" / "abc" / "n.md").write_text("x")
+    monkeypatch.setattr(server, "VAULT_PATH", mount)
+    assert not server._vault_ready()  # mounted, not yet linked
+    (mount / "vault").symlink_to(mount / ".git-sync" / "abc")
+    assert server._vault_ready()
+
+
+# BRD: FR-SRCH-1
+def test_vault_ready_for_local_dev_tree(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "VAULT_PATH", tmp_path)
+    assert not server._vault_ready()
+    (tmp_path / "context.md").write_text("x")
+    assert server._vault_ready()
+
+
+# BRD: FR-SRCH-1
 def test_index_current_only_for_this_schema(tmp_path):
     db = tmp_path / "index.db"
     assert not server._index_current(db)

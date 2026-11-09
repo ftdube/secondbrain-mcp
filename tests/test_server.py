@@ -249,6 +249,13 @@ def _unready_mount(tmp_path):
 
 
 # BRD: FR-IDX-6
+def test_build_index_never_reads_raw_git_sync_mount(tmp_path):
+    db = tmp_path / "index.db"
+    assert server.build_index(_unready_mount(tmp_path), db) == 0
+    assert server._index_current(db)
+
+
+# BRD: FR-IDX-6
 def test_watcher_skips_unready_mount(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "VAULT_PATH", _unready_mount(tmp_path))
     monkeypatch.setattr(server, "DB_PATH", tmp_path / "index.db")

@@ -133,7 +133,10 @@ def build_index(vault_path: Path, db_path: Path) -> int:
     if not effective.exists():
         effective = vault_path
     rows: list[tuple[str, str, str, str]] = []
-    for md in sorted(effective.rglob("*.md")) if effective.exists() else []:
+    # An unlinked git-sync mount holds notes only under .git-sync/<sha>/ paths, which
+    # must never be indexed (FR-IDX-6): it yields the empty, current-schema index.
+    raw_mount = effective == vault_path and (vault_path / ".git-sync").exists()
+    for md in sorted(effective.rglob("*.md")) if effective.exists() and not raw_mount else []:
         rel_path = md.relative_to(effective)
         rel = str(rel_path)
         if "Chat Archive" in rel:

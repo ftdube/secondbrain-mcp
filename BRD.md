@@ -370,6 +370,7 @@ Added in this revision (v1.1 of this document): `_iter_chunks` and `build_index`
 | FR-IDX-3 | Headings of level H4 or deeper SHALL NOT be treated as chunk boundaries; they remain part of the enclosing chunk's body. | Must | Implemented |
 | FR-IDX-4 | Notes under any directory literally named `Chat Archive` SHALL be excluded from indexing (they remain readable via `read_note`/`propose_edit` — see §10). | Must | Implemented |
 | FR-IDX-5 | Re-indexing SHALL be wholesale (drop and rebuild the FTS5 table from a full vault re-scan), not incremental. | Must | Implemented (regression-tested as of v1.4 — see OI-10) |
+| FR-IDX-6 | No reindex — at startup, by the vault watcher, or via `/reindex` — SHALL run while the vault is not ready: a git-sync mount (`.git-sync/` present) before its `vault/` link exists, or a local tree holding no note. `/reindex` then returns 503 and the current index is kept. | Must | Implemented |
 
 **Non-Functional**
 

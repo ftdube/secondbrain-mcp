@@ -233,6 +233,40 @@ def test_vault_ready_for_local_dev_tree(tmp_path, monkeypatch):
     assert server._vault_ready()
 
 
+def _unready_mount(tmp_path):
+    mount = tmp_path / "mount"
+    (mount / ".git-sync" / "abc").mkdir(parents=True)
+    (mount / ".git-sync" / "abc" / "n.md").write_text("# Note\n\nbody")
+    return mount
+
+
+# BRD: FR-IDX-6
+def test_watcher_skips_unready_mount(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "VAULT_PATH", _unready_mount(tmp_path))
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "index.db")
+    assert asyncio.run(server._watch_once(0.0)) == 0.0
+    assert not (tmp_path / "index.db").exists()
+
+
+# BRD: FR-IDX-6
+def test_watcher_reindexes_once_linked(tmp_path, monkeypatch):
+    mount = _unready_mount(tmp_path)
+    (mount / "vault").symlink_to(mount / ".git-sync" / "abc")
+    monkeypatch.setattr(server, "VAULT_PATH", mount)
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "index.db")
+    assert asyncio.run(server._watch_once(0.0)) > 0.0
+    assert server._index_current(tmp_path / "index.db")
+
+
+# BRD: FR-IDX-6
+def test_reindex_refuses_unready_mount(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "VAULT_PATH", _unready_mount(tmp_path))
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "index.db")
+    resp = asyncio.run(server._reindex(None))
+    assert resp.status_code == 503
+    assert not (tmp_path / "index.db").exists()
+
+
 # BRD: FR-SRCH-1
 def test_index_current_only_for_this_schema(tmp_path):
     db = tmp_path / "index.db"

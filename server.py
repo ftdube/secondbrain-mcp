@@ -508,18 +508,27 @@ async def _vault_watcher() -> None:
     last: float = 0.0
     while True:
         await asyncio.sleep(30)
-        try:
-            mtime = max(
-                f.stat().st_mtime
-                for f in _effective_vault().rglob("*.md")
-                if "Chat Archive" not in str(f)
-            )
-            if mtime > last:
-                log.info("vault updated, reindexing")
-                await asyncio.to_thread(build_index, VAULT_PATH, DB_PATH)
-                last = mtime
-        except (ValueError, FileNotFoundError):
-            pass
+        last = await _watch_once(last)
+
+
+async def _watch_once(last: float) -> float:
+    """One watcher poll: reindex if the vault is ready and changed since `last`."""
+    # FR-IDX-6: an unready git-sync mount would be scanned through .git-sync/ paths.
+    if not _vault_ready():
+        return last
+    try:
+        mtime = max(
+            f.stat().st_mtime
+            for f in _effective_vault().rglob("*.md")
+            if "Chat Archive" not in str(f)
+        )
+    except (ValueError, FileNotFoundError):
+        return last
+    if mtime > last:
+        log.info("vault updated, reindexing")
+        await asyncio.to_thread(build_index, VAULT_PATH, DB_PATH)
+        return mtime
+    return last
 
 
 # ── HTTP app ──────────────────────────────────────────────────────────────────
@@ -547,6 +556,8 @@ async def _health(_: Request) -> JSONResponse:
 
 
 async def _reindex(_: Request) -> JSONResponse:
+    if not _vault_ready():  # FR-IDX-6
+        return JSONResponse({"status": "vault not ready"}, status_code=503)
     n = await asyncio.to_thread(build_index, VAULT_PATH, DB_PATH)
     return JSONResponse({"status": "indexed", "chunks": n})
 

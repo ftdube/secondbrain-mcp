@@ -246,13 +246,6 @@ def test_index_current_only_for_this_schema(tmp_path):
     assert server._index_current(db)
 
 
-# BRD: FR-SRCH-6
-def test_any_term_drops_french_function_words_and_elisions():
-    assert server._any_term("Où est la sauvegarde de l'ordinateur?") == '"sauvegarde" OR "ordinateur"'
-    # "comment" is French for "how" but an English content word, so it is kept.
-    assert '"comment"' in server._any_term("comment review")
-
-
 # BRD: FR-SRCH-1
 def test_search_matches_note_title(tmp_path, monkeypatch):
     db = _indexed_vault(tmp_path, {"Decisions/Hosts-Pull_Updates.md": "Nothing is pushed to a machine."})

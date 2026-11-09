@@ -217,9 +217,7 @@ SEARCH_LIMIT = 10
 
 # Words that carry no subject. Requiring them is what made a question phrased in
 # plain language miss: every term had to occur in one chunk, "how" and "is" included.
-# The vault is English and French. Only question and function words are listed, and
-# French ones that are also English content words ("comment", "son") are left out.
-_STOPWORDS_EN = frozenset([
+_STOPWORDS = frozenset([
     "a", "about", "an", "and", "any", "are", "as", "at", "be", "been", "but", "by",
     "can", "could", "did", "do", "does", "for", "from", "had", "has", "have", "how",
     "i", "if", "in", "into", "is", "it", "its", "me", "my", "no", "not", "of", "on",
@@ -228,17 +226,6 @@ _STOPWORDS_EN = frozenset([
     "when", "where", "which", "who", "whom", "why", "will", "with", "would", "you",
     "your",
 ])
-_STOPWORDS_FR = frozenset([
-    "à", "au", "aux", "avec", "c", "ce", "ces", "cet", "cette", "ça", "cela", "chez",
-    "d", "dans", "de", "des", "du", "elle", "elles", "en", "entre", "est", "et", "été",
-    "être", "il", "ils", "j", "je", "l", "la", "le", "les", "leur", "leurs", "lui",
-    "ma", "mais", "me", "mes", "moi", "mon", "n", "ne", "ni", "nos", "notre", "nous",
-    "ont", "ou", "où", "par", "pas", "pour", "pourquoi", "qu", "quand", "que", "quel",
-    "quelle", "quelles", "quels", "qui", "quoi", "s", "sa", "sans", "se", "ses", "si",
-    "sont", "sous", "sur", "t", "ta", "te", "tes", "toi", "ton", "tu", "un", "une",
-    "vers", "vos", "votre", "vous", "y",
-])
-_STOPWORDS = _STOPWORDS_EN | _STOPWORDS_FR
 
 _SEARCH_SQL = """
     SELECT rowid,

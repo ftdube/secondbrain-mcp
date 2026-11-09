@@ -95,10 +95,10 @@ def _iter_chunks(path: str, text: str):
         yield path, prev_heading, tail
 
 
+# A note's name is often the only place its subject is stated outright: a decision
+# titled for what it decides may never repeat that phrase in its body.
 def _title(rel_path: Path) -> str:
-    """FR-SRCH-1: the note's folders and filename as words. A note's name is often the
-    only place its subject is stated outright -- a decision titled for what it decides
-    may never repeat that phrase in its body."""
+    """FR-SRCH-1: the note's folders and filename as words."""
     return re.sub(r"[-_]+", " ", " ".join(rel_path.with_suffix("").parts))
 
 
@@ -221,10 +221,10 @@ _FTS_SYNTAX = re.compile(r'["*^():]|\b(?:AND|OR|NOT|NEAR)\b')
 PARTIAL_MARKER = "_Partial matches — some of the words:_"
 
 
+# Stopwords are dropped unless nothing else is left; bm25 still ranks a chunk matching
+# more of the words above one matching fewer.
 def _any_term(query: str) -> str | None:
-    """FR-SRCH-6: the query's words, each quoted so none reads as FTS5 syntax, joined
-    with OR. Stopwords are dropped unless nothing else is left. bm25 still ranks a
-    chunk matching more of the words above one matching fewer."""
+    """FR-SRCH-6: the query's words, each quoted so none reads as FTS5 syntax, joined with OR."""
     words = re.findall(r"\w+", query.lower())
     kept = [w for w in words if w not in _STOPWORDS] or words
     return " OR ".join(f'"{w}"' for w in dict.fromkeys(kept)) or None

@@ -483,7 +483,7 @@ This section consolidates and cross-references §9.2 and §9.8; only requirement
 | `mcp_propose_edits_total` | Counter | NFR-PROP-10 |
 | `mcp_last_reindex_timestamp_seconds` | Gauge | NFR-OBS-1 *(§9.11, not yet implemented — [issue #60](https://github.com/ftdube/secondbrain-mcp/issues/60))* |
 
-All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheus scraping; no dashboards or alerting rules are defined by this document beyond the Phase 1b trigger already specified in `next-steps.md` (NFR-SRCH-3). `/health`'s planned readiness signal (FR-OBS-1, §9.11) is a separate, non-metric mechanism intended for K8s probe wiring, not Prometheus.
+All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheus scraping; no dashboards or alerting rules are defined by this document; Phase 1b is judged by the recall gate in §14, not by an alert (NFR-SRCH-3). `/health`'s planned readiness signal (FR-OBS-1, §9.11) is a separate, non-metric mechanism intended for K8s probe wiring, not Prometheus.
 
 ## 14. Success Metrics / KPIs & Acceptance Criteria
 

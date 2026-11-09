@@ -214,6 +214,19 @@ def test_build_index_without_vault_replaces_old_schema(tmp_path):
 
 
 # BRD: FR-SRCH-1
+def test_index_current_only_for_this_schema(tmp_path):
+    db = tmp_path / "index.db"
+    assert not server._index_current(db)
+    sqlite3.connect(db).execute("CREATE VIRTUAL TABLE chunks_fts USING fts5(path UNINDEXED, heading, body)")
+    assert not server._index_current(db)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "n.md").write_text("x")
+    server.build_index(vault, db)
+    assert server._index_current(db)
+
+
+# BRD: FR-SRCH-1
 def test_search_matches_note_title(tmp_path, monkeypatch):
     db = _indexed_vault(tmp_path, {"Decisions/Hosts-Pull_Updates.md": "Nothing is pushed to a machine."})
     monkeypatch.setattr(server, "DB_PATH", db)

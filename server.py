@@ -102,6 +102,20 @@ def _title(rel_path: Path) -> str:
     return re.sub(r"[-_]+", " ", " ".join(rel_path.with_suffix("").parts))
 
 
+INDEX_COLUMNS = ["path", "title", "heading", "body"]
+
+
+def _index_current(db_path: Path) -> bool:
+    """True when db_path already holds chunks_fts with this version's columns."""
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(db_path)
+    try:
+        return [r[1] for r in conn.execute("PRAGMA table_info(chunks_fts)")] == INDEX_COLUMNS
+    finally:
+        conn.close()
+
+
 def build_index(vault_path: Path, db_path: Path) -> int:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -502,11 +516,12 @@ async def _vault_watcher() -> None:
 @asynccontextmanager
 async def _lifespan(app: Starlette) -> AsyncIterator[None]:
     async with mcp_asgi.lifespan(app):
+        if VAULT_PATH.exists() or not _index_current(DB_PATH):
+            # Without a vault this builds an empty index: better than an older schema
+            # search's column indexes would not fit.
+            build_index(VAULT_PATH, DB_PATH)
         if not VAULT_PATH.exists():
-            log.warning("vault not mounted at startup; index empty until first sync")
-        # Unconditional: a persisted DB_PATH may hold an older schema, which search's
-        # column indexes would not fit. An empty index is better than an erroring one.
-        build_index(VAULT_PATH, DB_PATH)
+            log.warning("vault not mounted at startup; serving the persisted index until first sync")
         asyncio.create_task(_vault_watcher())
         yield
 

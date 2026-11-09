@@ -92,7 +92,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 
 | Item | Why |
 |---|---|
-| Semantic / embedding-based search (ONNX, sqlite-vec, RRF hybrid) | Deferred to Phase 1b; triggered by recall on a labelled query set (§14, `next-steps.md`) |
+| Semantic / embedding-based search (ONNX, sqlite-vec, RRF hybrid) | Deferred to Phase 1b; accepted only on a recall gain over the labelled question set (§14, `next-steps.md`) |
 | Vector database (Qdrant), reranking (Ollama) | Phase 2a/2b; triggered by scale or quality thresholds not yet met |
 | Multi-user / multi-tenant access control | Current deployment model is single-operator; see `RISKS.md` RISK-6 |
 | Non-Obsidian vault formats | Vault is assumed to be a Markdown tree with Obsidian conventions (wikilinks, `_map.md`, `context.md`) |
@@ -246,7 +246,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 |---|---|---|---|
 | NFR-SRCH-1 | `search` SHALL execute entirely against the local SQLite FTS5 index; no network call in the query path. | Must | Implemented |
 | NFR-SRCH-2 | Each call increments `mcp_searches_total`; response size increments `mcp_search_chars_total`; a zero-result response additionally increments `mcp_search_misses_total`; a call that only FR-SRCH-6 answered increments `mcp_search_widened_total`. | Must | Implemented |
-| NFR-SRCH-3 | `mcp_search_misses_total / mcp_searches_total` is NOT a Phase 1b trigger: since FR-SRCH-6 a query sharing one word with the vault returns results, relevant or not. `mcp_search_widened_total / mcp_searches_total` is the share of searches no chunk matched on every term; it is diagnostic, not a quality measure. The Phase 1b trigger is recall on a labelled query set (§14). | Must | Implemented (metrics); Phase 1b itself is out of scope (§4.2) |
+| NFR-SRCH-3 | `mcp_search_misses_total / mcp_searches_total` is NOT a Phase 1b trigger: since FR-SRCH-6 a query sharing one word with the vault returns results, relevant or not. `mcp_search_widened_total / mcp_searches_total` is the share of searches no chunk matched on every term; it is diagnostic, not a quality measure. Phase 1b is judged by recall on a labelled question set (§14). | Must | Implemented (metrics); Phase 1b itself is out of scope (§4.2) |
 | NFR-SRCH-4 | Malformed FTS5 query syntax SHALL NOT raise an unhandled `sqlite3.OperationalError` to the client. | Must | Implemented |
 | NFR-SRCH-5 | Subject to NFR-COM-5 (freshness bound). | Must | Implemented |
 | NFR-SRCH-6 | The `porter unicode61` tokenization (FR-SRCH-1) stemming may degrade matching for exact code symbols (e.g., `camelCase`, `snake_case`, punctuation). This is a known limitation for code search, accepted for Phase 1a, to be mitigated by Phase 1b embeddings. | Must (by design) | Implemented (documented limitation) |
@@ -488,7 +488,7 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 ## 14. Success Metrics / KPIs & Acceptance Criteria
 
 - **Token budget:** tool-schema overhead SHALL stay ≤ ~3.5k tokens/session (five tools), against a generic-filesystem-MCP baseline of ~10k tokens (G3).
-- **Search quality gate:** on a labelled set of real queries, each paired with the note that answers it, that note SHALL appear in the top 10 for ≥ 80% of queries; falling below is the trigger for Phase 1b work (out of scope for this revision). The set is built from FR-SRCH-7's log and frozen before it is scored.
+- **Search quality gate:** recall@5 on a fixed set of ~30 real questions, each paired with the section that answers it, built from FR-SRCH-7's log and frozen before it is scored. It is measured on the current search first; Phase 1b (out of scope for this revision) is accepted only on a recall gain over that baseline.
 - **Acceptance criteria for v1.1.0:** every FR/NFR row in §9.7 (`propose_edit`) and the multi-file addition in particular (FR-PROP-8, NFR-PROP-8, NFR-PROP-9) has a passing automated regression test (§9.1's traceability requirement); `ruff` reports no new lint findings versus the pre-`propose_edit` baseline; the model-free-apply gate (NFR-PROP-5) is codified in `AGENTS.md`, not merely in this document.
 
 ## 15. Appendices

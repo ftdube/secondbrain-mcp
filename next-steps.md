@@ -5,7 +5,7 @@
 | Phase | Stack | RAM | Trigger |
 |---|---|---|---|
 | **1a** ✅ deployed | FTS5 only | ~80 MB | — |
-| 1b | + ONNX MiniLM + sqlite-vec + RRF | ~380 MB | Recall below 80% on the labelled query set |
+| 1b | + ONNX MiniLM + sqlite-vec + RRF | ~380 MB | Baseline recall@5 measured on the labelled question set; accepted only on a gain |
 | 2a | sqlite-vec → Qdrant | ~280 MB + 80 MB | >300 notes or re-embed cost on restart |
 | 2b | + Ollama reranker on external PC | ~100 MB + PC | Quality still insufficient |
 
@@ -13,11 +13,11 @@
 
 The miss rate stopped being a trigger once `search` fills with any-word matches (FR-SRCH-6): a query sharing one word with the vault now returns something, relevant or not. Recall is measured instead (BRD §14):
 
-1. Run with `SEARCH_LOG_QUERIES=1` until ~30 real queries are logged.
-2. Pair each with the note that answers it. Freeze the set before scoring it.
-3. Score: share of queries whose note is in the top 10. Below 80% → Phase 1b.
+1. Run with `SEARCH_LOG_QUERIES=1` until ~30 real questions are logged.
+2. Pair each with the section that answers it. Freeze the set before scoring it.
+3. Score recall@5 on the current search: that is the baseline. Phase 1b ships only if it beats it on the same set.
 
-Trigger: ~30 logged queries.
+Trigger: ~30 logged questions.
 
 ## Phase 1b detail
 

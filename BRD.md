@@ -5,9 +5,9 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.14 (Draft) |
-| System / API version documented | 1.3.1 |
-| Date | 2026-10-07 |
+| Document version | 1.15 (Draft) |
+| System / API version documented | 1.4.0 |
+| Date | 2026-11-09 |
 | Author | Claude Code, on behalf of the repository owner |
 | Classification | Public (repository is open-source; see §6 for redaction policy) |
 | Related artifacts | [`AGENTS.md`](AGENTS.md), [`REBUILD.md`](REBUILD.md), [`RISKS.md`](RISKS.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md), [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) |
@@ -31,6 +31,7 @@
 | 1.12 | 2026-08-25 | Comparative gap audit against the sibling `vault-publisher` repo's BRD (same operator, same self-hosted cluster), requested to check for portable security/monitoring/uptime requirements. Added new §9.11 (OBS): FR-OBS-1 (`/health` readiness signal) and NFR-OBS-1 (reindex-staleness gauge), both Not implemented, tracked as [issue #59](https://github.com/ftdube/secondbrain-mcp/issues/59)/[#60](https://github.com/ftdube/secondbrain-mcp/issues/60); NFR-OBS-2 (RAM bound, Could) tracked as [issue #61](https://github.com/ftdube/secondbrain-mcp/issues/61). Added NFR-SEC-7 (§12) — `git-sync` currently shares `push-sync`'s read-write SSH key (`compose.yaml`, documented in `README.md`), giving the read-only sidecar unnecessary write credentials; Not implemented, tracked as [issue #58](https://github.com/ftdube/secondbrain-mcp/issues/58) and `RISKS.md` RISK-11. No system-version bump — documentation and backlog only, no code changed. |
 | 1.13 | 2026-08-26 | Implemented NFR-SEC-7 (issue #58): `git-sync` now uses a separate read-only SSH key via `GITSYNC_SSH_KEY_PATH`. Updated `README.md` with key generation instructions. |
 | 1.14 | 2026-10-07 | `agents.md` renamed `AGENTS.md` (its `claude.md`/`gemini.md` symlinks removed); `REBUILD.md` added. No requirement changed. |
+| 1.15 | 2026-11-09 | `search` recall. Every query term had to occur in one chunk, so a question asked in plain language missed (33–47% of searches over 7–90 days). Changed FR-SRCH-1 (note title indexed), FR-SRCH-2, FR-SRCH-3 (~64-token snippet), FR-SRCH-4 (inner quotes doubled), NFR-SRCH-2, NFR-SRCH-3 (the miss rate no longer triggers Phase 1b) and the §14 quality gate; added FR-SRCH-6 (any-term fill), FR-SRCH-7 (opt-in query log), NFR-SRCH-7 (latency histogram). System version → 1.4.0. |
 
 Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 
@@ -87,11 +88,11 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 - Operational HTTP endpoints: health check, Prometheus metrics, manual reindex trigger, OAuth protected-resource metadata.
 - An operator-configured `VAULT_BLACKLIST` excluding chosen vault subdirectories from indexing, `read_note`, and `propose_edit` (§9.10).
 
-### 4.2 Out of Scope (system version 1.3.1)
+### 4.2 Out of Scope (system version 1.4.0)
 
 | Item | Why |
 |---|---|
-| Semantic / embedding-based search (ONNX, sqlite-vec, RRF hybrid) | Deferred to Phase 1b; triggered only if the FTS5 miss-rate metric crosses threshold (§9.4, §14) |
+| Semantic / embedding-based search (ONNX, sqlite-vec, RRF hybrid) | Deferred to Phase 1b; triggered by recall on a labelled query set (§14, `next-steps.md`) |
 | Vector database (Qdrant), reranking (Ollama) | Phase 2a/2b; triggered by scale or quality thresholds not yet met |
 | Multi-user / multi-tenant access control | Current deployment model is single-operator; see `RISKS.md` RISK-6 |
 | Non-Obsidian vault formats | Vault is assumed to be a Markdown tree with Obsidian conventions (wikilinks, `_map.md`, `context.md`) |
@@ -231,22 +232,25 @@ As of document v1.12, the following are excused from that requirement as inheren
 
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
-| FR-SRCH-1 | The tool SHALL accept a single free-text `query` string and match it against the FTS5 `chunks_fts` table using `porter unicode61` tokenization. | Must | Implemented |
-| FR-SRCH-2 | Matching rows SHALL be ordered by FTS5 `rank` and limited to at most **10** results per call. | Must | Implemented |
-| FR-SRCH-3 | Each result SHALL surface the note's vault-relative path, the heading of the containing chunk, and a ~30-token snippet with the match ellipsized (`…`). | Must | Implemented |
-| FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase. | Must | Implemented |
+| FR-SRCH-1 | The tool SHALL accept a single free-text `query` string and match it against the FTS5 `chunks_fts` table using `porter unicode61` tokenization. Each chunk is indexed with its note's title (the vault-relative path without `.md`, `-` and `_` read as spaces), its heading and its body. | Must | Implemented |
+| FR-SRCH-2 | Rows matching the query as given SHALL come first, ordered by FTS5 `rank`; at most **10** results per call. | Must | Implemented |
+| FR-SRCH-3 | Each result SHALL surface the note's vault-relative path, the heading of the containing chunk, and a ~64-token snippet of the body with the match ellipsized (`…`). | Must | Implemented |
+| FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase, any double quote inside it doubled. | Must | Implemented |
 | FR-SRCH-5 | If zero rows match after any retry, the tool SHALL return the literal string `"No results."`. | Must | Implemented |
+| FR-SRCH-6 | If fewer than 10 rows match the query as given, the tool SHALL fill the remaining places with rows matching **any** of its words, ordered by `rank` and never repeating a row. Words are quoted so none reads as FTS5 syntax; common words ("how", "is", "the") are dropped unless nothing else is left. | Must | Implemented |
+| FR-SRCH-7 | With `SEARCH_LOG_QUERIES=1`, each call SHALL log its query, result count and whether FR-SRCH-6 alone answered it, at INFO. Unset, no query text is logged: a query can reveal as much as the note it looks for. | Should | Implemented |
 
 **Non-Functional**
 
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
 | NFR-SRCH-1 | `search` SHALL execute entirely against the local SQLite FTS5 index; no network call in the query path. | Must | Implemented |
-| NFR-SRCH-2 | Each call increments `mcp_searches_total`; response size increments `mcp_search_chars_total`; a zero-result response additionally increments `mcp_search_misses_total`. | Must | Implemented |
-| NFR-SRCH-3 | `mcp_search_misses_total / mcp_searches_total` is the designated trigger metric for the Phase 1b hybrid-search decision (alert threshold: >20% miss rate over a rolling 7 days). | Must | Implemented (metric); Phase 1b itself is out of scope (§4.2) |
+| NFR-SRCH-2 | Each call increments `mcp_searches_total`; response size increments `mcp_search_chars_total`; a zero-result response additionally increments `mcp_search_misses_total`; a call that only FR-SRCH-6 answered increments `mcp_search_widened_total`. | Must | Implemented |
+| NFR-SRCH-3 | `mcp_search_misses_total / mcp_searches_total` is NOT a Phase 1b trigger: since FR-SRCH-6 a query sharing one word with the vault returns results, relevant or not. `mcp_search_widened_total / mcp_searches_total` is the share of searches no chunk matched on every term; it is diagnostic, not a quality measure. The Phase 1b trigger is recall on a labelled query set (§14). | Must | Implemented (metrics); Phase 1b itself is out of scope (§4.2) |
 | NFR-SRCH-4 | Malformed FTS5 query syntax SHALL NOT raise an unhandled `sqlite3.OperationalError` to the client. | Must | Implemented |
 | NFR-SRCH-5 | Subject to NFR-COM-5 (freshness bound). | Must | Implemented |
 | NFR-SRCH-6 | The `porter unicode61` tokenization (FR-SRCH-1) stemming may degrade matching for exact code symbols (e.g., `camelCase`, `snake_case`, punctuation). This is a known limitation for code search, accepted for Phase 1a, to be mitigated by Phase 1b embeddings. | Must (by design) | Implemented (documented limitation) |
+| NFR-SRCH-7 | Each call's latency SHALL be recorded in the `mcp_search_seconds` histogram. | Should | Implemented |
 
 ### 9.5 `read_note(path)` (`READ`)
 
@@ -472,7 +476,8 @@ This section consolidates and cross-references §9.2 and §9.8; only requirement
 | Metric | Type | Source requirement |
 |---|---|---|
 | `mcp_overviews_total`, `mcp_overview_chars_total` | Counter | NFR-OVW-2 |
-| `mcp_searches_total`, `mcp_search_chars_total`, `mcp_search_misses_total` | Counter | NFR-SRCH-2, NFR-SRCH-3 |
+| `mcp_searches_total`, `mcp_search_chars_total`, `mcp_search_misses_total`, `mcp_search_widened_total` | Counter | NFR-SRCH-2, NFR-SRCH-3 |
+| `mcp_search_seconds` | Histogram | NFR-SRCH-7 |
 | `mcp_reads_total`, `mcp_read_chars_total` | Counter | NFR-READ-1 |
 | `mcp_notes_total` | Counter | NFR-NOTE-2 |
 | `mcp_propose_edits_total` | Counter | NFR-PROP-10 |
@@ -483,7 +488,7 @@ All counters are exposed unauthenticated at `/metrics` (NFR-COM-4) for Prometheu
 ## 14. Success Metrics / KPIs & Acceptance Criteria
 
 - **Token budget:** tool-schema overhead SHALL stay ≤ ~3.5k tokens/session (five tools), against a generic-filesystem-MCP baseline of ~10k tokens (G3).
-- **Search quality gate:** rolling 7-day `mcp_search_misses_total / mcp_searches_total` SHALL stay ≤ 20%; crossing this threshold is the sole documented trigger for starting Phase 1b work (out of scope for this revision).
+- **Search quality gate:** on a labelled set of real queries, each paired with the note that answers it, that note SHALL appear in the top 10 for ≥ 80% of queries; falling below is the trigger for Phase 1b work (out of scope for this revision). The set is built from FR-SRCH-7's log and frozen before it is scored.
 - **Acceptance criteria for v1.1.0:** every FR/NFR row in §9.7 (`propose_edit`) and the multi-file addition in particular (FR-PROP-8, NFR-PROP-8, NFR-PROP-9) has a passing automated regression test (§9.1's traceability requirement); `ruff` reports no new lint findings versus the pre-`propose_edit` baseline; the model-free-apply gate (NFR-PROP-5) is codified in `AGENTS.md`, not merely in this document.
 
 ## 15. Appendices

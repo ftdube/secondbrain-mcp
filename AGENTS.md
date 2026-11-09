@@ -19,7 +19,7 @@ Self-hosted MCP server giving Claude mobile access to an Obsidian vault via 5 to
 
 ## Non-obvious
 - The Starlette lifespan must run `async with mcp_asgi.lifespan(app)` to start FastMCP's task group — without it every tool call returns 500
-- FTS5 `snippet()` column index 2 = body (0 = path UNINDEXED, 1 = heading) — update the index if the schema changes
+- FTS5 `snippet()` column index 3 = body (0 = path UNINDEXED, 1 = title, 2 = heading) — update the index if the schema changes
 - FTS5 query errors are caught and retried as a quoted phrase — intentional, not a bug
 - A Dex key rotation needs a pod restart: JWKS keys are cached in-process (NFR-AUTH-2)
 - OIDC discovery is skipped; `DEX_JWKS_URI` points at the in-cluster JWKS endpoint (NFR-AUTH-3)

@@ -137,6 +137,96 @@ def test_search_fts_syntax_fallback(tmp_path, monkeypatch):
     assert isinstance(result, str)
 
 
+
+def _indexed_vault(tmp_path, notes: dict[str, str]):
+    vault = tmp_path / "vault"
+    for rel, content in notes.items():
+        (vault / rel).parent.mkdir(parents=True, exist_ok=True)
+        (vault / rel).write_text(content)
+    db = tmp_path / "index.db"
+    server.build_index(vault, db)
+    return db
+
+
+def _paths(result: str) -> list[str]:
+    return re.findall(r"^\*\*(.+?)\*\* — ", result, re.M)
+
+
+# BRD: FR-SRCH-6
+def test_search_plain_language_question_widens(tmp_path, monkeypatch):
+    # No chunk holds every word ("how", "is", "updated" never occur), which used to
+    # return "No results." for a question the vault plainly answers.
+    db = _indexed_vault(tmp_path, {"inference.md": "# Ollama\n\nThe ollama service runs on the gpu host."})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    before = _value(server.SEARCH_WIDENED)
+    result = server.search("how is ollama updated on the gpu host")
+    assert _paths(result) == ["inference.md"]
+    assert _value(server.SEARCH_WIDENED) == before + 1
+
+
+# BRD: FR-SRCH-6, FR-SRCH-2
+def test_search_all_terms_rank_before_any_term(tmp_path, monkeypatch):
+    db = _indexed_vault(tmp_path, {
+        "one.md": "alpha",
+        "both.md": "alpha beta",
+        "other.md": "beta gamma",
+    })
+    monkeypatch.setattr(server, "DB_PATH", db)
+    before = _value(server.SEARCH_WIDENED)
+    paths = _paths(server.search("alpha beta"))
+    assert paths[0] == "both.md"
+    assert sorted(paths[1:]) == ["one.md", "other.md"]
+    assert _value(server.SEARCH_WIDENED) == before  # an all-terms hit existed
+
+
+# BRD: FR-SRCH-6
+def test_search_stopword_only_query_still_searches(tmp_path, monkeypatch):
+    # Every word is a stopword, so none is dropped; the chunk holds only one of them.
+    db = _indexed_vault(tmp_path, {"note.md": "what"})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    assert _paths(server.search("what is it")) == ["note.md"]
+
+
+# BRD: FR-SRCH-1
+def test_search_matches_note_title(tmp_path, monkeypatch):
+    db = _indexed_vault(tmp_path, {"Decisions/Hosts-Pull_Updates.md": "Nothing is pushed to a machine."})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    assert _paths(server.search("pull")) == ["Decisions/Hosts-Pull_Updates.md"]
+
+
+# BRD: FR-SRCH-4
+def test_search_query_with_quote_does_not_error(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Hello\n\nsay hello world")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    result = server.search('hello "world')
+    assert not result.startswith("Error")
+    assert "note.md" in result
+
+
+# BRD: NFR-SRCH-7
+def test_search_records_latency(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+
+    def count():
+        return next(s.value for m in server.SEARCH_SECONDS.collect()
+                    for s in m.samples if s.name.endswith("_count"))
+    before = count()
+    server.search("Python")
+    assert count() == before + 1
+
+
+# BRD: FR-SRCH-7
+def test_search_logs_query_only_when_enabled(tmp_path, monkeypatch, caplog):
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    caplog.set_level("INFO", logger=server.log.name)
+    server.search("secret topic")
+    assert "secret topic" not in caplog.text
+    monkeypatch.setattr(server, "SEARCH_LOG_QUERIES", True)
+    server.search("python question")
+    assert "python question" in caplog.text
+
 # ── read_note ─────────────────────────────────────────────────────────────────
 
 # BRD: FR-READ-1 (VAULT_PATH fallback branch — see test_read_note_prefers_nested_vault_dir for the other branch)

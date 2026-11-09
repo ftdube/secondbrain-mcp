@@ -169,12 +169,14 @@ PROPOSE_COUNTER = Counter("mcp_propose_edits_total",    "Total propose_edit tool
 
 
 def _vault_ready() -> bool:
-    """git-sync's vault/ link exists, or (local dev) VAULT_PATH itself holds notes."""
+    """git-sync's vault/ link exists, or (local dev, no .git-sync/) the tree holds a note."""
     # The mount exists before git-sync links it; indexing then reads an empty or
     # half-written tree and replaces a good persisted index with nothing.
     if (VAULT_PATH / "vault").exists():
         return True
-    return VAULT_PATH.is_dir() and any(VAULT_PATH.glob("*.md"))
+    if (VAULT_PATH / ".git-sync").exists():
+        return False
+    return VAULT_PATH.is_dir() and any(VAULT_PATH.rglob("*.md"))
 
 
 def _effective_vault() -> Path:

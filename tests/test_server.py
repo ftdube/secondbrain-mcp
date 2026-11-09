@@ -228,7 +228,8 @@ def test_vault_ready_waits_for_git_sync_link(tmp_path, monkeypatch):
 def test_vault_ready_for_local_dev_tree(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "VAULT_PATH", tmp_path)
     assert not server._vault_ready()
-    (tmp_path / "context.md").write_text("x")
+    (tmp_path / "Domain").mkdir()
+    (tmp_path / "Domain" / "note.md").write_text("x")  # nested only, no top-level note
     assert server._vault_ready()
 
 

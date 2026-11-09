@@ -267,7 +267,9 @@ def search(query: str) -> str:
                 try:
                     rows = conn.execute(_SEARCH_SQL, (query, SEARCH_LIMIT)).fetchall()
                 except sqlite3.OperationalError:
-                    plain = True  # not valid syntax, so not syntax the caller meant
+                    # Not valid syntax, so not syntax the caller meant -- except an
+                    # exclusion: filling would return what a NOT asked to leave out.
+                    plain = not re.search(r"\bNOT\b", query)
                     # FR-SRCH-4: FTS5 syntax error -- retry as a quoted phrase. Inner quotes
                     # are doubled, or a query containing one fails the retry as well.
                     phrase = '"' + query.replace('"', '""') + '"'

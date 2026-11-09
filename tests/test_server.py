@@ -202,6 +202,14 @@ def test_search_respects_explicit_fts_syntax(tmp_path, monkeypatch):
     assert server.PARTIAL_MARKER not in server.search('"alpha beta"')
 
 
+# BRD: FR-SRCH-6
+def test_search_malformed_not_query_is_not_filled(tmp_path, monkeypatch):
+    db = _indexed_vault(tmp_path, {"keep.md": "alpha", "drop.md": "alpha beta"})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    result = server.search('alpha NOT "beta')  # unbalanced quote: a syntax error
+    assert "drop.md" not in result
+
+
 # BRD: FR-SRCH-1
 def test_build_index_without_vault_replaces_old_schema(tmp_path):
     db = tmp_path / "index.db"

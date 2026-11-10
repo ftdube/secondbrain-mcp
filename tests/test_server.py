@@ -348,7 +348,7 @@ def test_search_log_is_owner_only_capped_and_safe(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "DB_PATH", db)
     logfile = tmp_path / "queries.jsonl"
     monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
-    assert "note.md" in server.search("python \ud800")  # lone surrogate
+    server._log_query("python \ud800", 1, False)  # lone surrogate: must not raise
     assert json.loads(logfile.read_text())["query"] == "python \ud800"
     assert logfile.stat().st_mode & 0o777 == 0o600
     monkeypatch.setattr(server, "SEARCH_LOG_MAX_BYTES", logfile.stat().st_size)

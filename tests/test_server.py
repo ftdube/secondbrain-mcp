@@ -371,6 +371,17 @@ def test_search_log_tightens_existing_file_and_never_crosses_cap(tmp_path, monke
 
 
 # BRD: FR-SRCH-7
+def test_failed_search_is_still_logged(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "no-index.db")  # no chunks_fts table
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    assert server.search("python").startswith("Error")
+    entries = [json.loads(line) for line in logfile.read_text().splitlines()]
+    assert entries == [{**entries[0], "query": "python", "results": 0, "error": True}]
+
+
+# BRD: FR-SRCH-7
 def test_search_log_rolls_back_a_partial_write(tmp_path, monkeypatch):
     logfile = tmp_path / "queries.jsonl"
     monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)

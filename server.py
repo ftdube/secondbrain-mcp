@@ -259,12 +259,12 @@ _SEARCH_LOG_LOCK = threading.Lock()
 _search_log_full_warned = False
 
 
-def _log_query(query: str, results: int, widened: bool) -> None:
+def _log_query(query: str, results: int, widened: bool, error: bool = False) -> None:
     """FR-SRCH-7: append one JSON line, owner-only, within the cap; never fails the search."""
     global _search_log_full_warned
     # ensure_ascii: a lone surrogate in the query would otherwise fail the encode.
     line = (json.dumps({"ts": datetime.now(UTC).isoformat(timespec="seconds"), "query": query,
-                        "results": results, "widened": widened}) + "\n").encode("ascii")
+                        "results": results, "widened": widened, "error": error}) + "\n").encode("ascii")
     try:
         with _SEARCH_LOG_LOCK:
             fd = os.open(SEARCH_LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
@@ -304,10 +304,11 @@ def _any_term(query: str) -> str | None:
 @mcp.tool()
 def search(query: str) -> str:
     """Search the vault by keyword. Plain-language questions work: chunks containing every word rank first, then chunks containing any of them. Returns up to 10 excerpts (path, heading, ~64-token snippet)."""
+    logged = query  # as given; recorded even if the search fails (FR-SRCH-7)
     try:
         SEARCH_COUNTER.inc()
         # A lone surrogate cannot be bound into SQLite; the log keeps the query as given.
-        logged, query = query, query.encode("utf-8", "replace").decode("utf-8")
+        query = query.encode("utf-8", "replace").decode("utf-8")
         with SEARCH_SECONDS.time():
             conn = sqlite3.connect(DB_PATH)
             try:
@@ -335,6 +336,7 @@ def search(query: str) -> str:
             SEARCH_WIDENED.inc()
         if SEARCH_LOG_PATH:
             _log_query(logged, len(rows) + len(extra), widened)
+            logged = None
         if not rows and not extra:
             SEARCH_MISSES.inc()
             return "No results."
@@ -346,6 +348,8 @@ def search(query: str) -> str:
         SEARCH_CHARS.inc(len(result))
         return result
     except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
+        if SEARCH_LOG_PATH and logged is not None:
+            _log_query(logged, 0, False, error=True)
         return f"Error: {e}"
 
 

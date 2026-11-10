@@ -5,9 +5,9 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.15 (Draft) |
-| System / API version documented | 1.4.0 |
-| Date | 2026-11-09 |
+| Document version | 1.16 (Draft) |
+| System / API version documented | 1.4.1 |
+| Date | 2026-11-10 |
 | Author | Claude Code, on behalf of the repository owner |
 | Classification | Public (repository is open-source; see §6 for redaction policy) |
 | Related artifacts | [`AGENTS.md`](AGENTS.md), [`REBUILD.md`](REBUILD.md), [`RISKS.md`](RISKS.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md), [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) |
@@ -32,6 +32,7 @@
 | 1.13 | 2026-08-26 | Implemented NFR-SEC-7 (issue #58): `git-sync` now uses a separate read-only SSH key via `GITSYNC_SSH_KEY_PATH`. Updated `README.md` with key generation instructions. |
 | 1.14 | 2026-10-07 | `agents.md` renamed `AGENTS.md` (its `claude.md`/`gemini.md` symlinks removed); `REBUILD.md` added. No requirement changed. |
 | 1.15 | 2026-11-09 | `search` recall. Every query term had to occur in one chunk, so a question asked in plain language missed (33–47% of searches over 7–90 days). Changed FR-SRCH-1 (note title indexed), FR-SRCH-2, FR-SRCH-3 (~64-token snippet), FR-SRCH-4 (inner quotes doubled), NFR-SRCH-2, NFR-SRCH-3 (the miss rate no longer triggers Phase 1b) and the §14 quality gate; added FR-SRCH-6 (any-term fill), FR-SRCH-7 (opt-in query log), NFR-SRCH-7 (latency histogram). System version → 1.4.0. |
+| 1.16 | 2026-11-10 | FR-SRCH-7: the query log goes to a file named by `SEARCH_LOG_PATH`, never to stdout, which the deployment ships to an unauthenticated log store. `SEARCH_LOG_QUERIES` removed before any deployment set it. System version → 1.4.1. |
 
 Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 
@@ -78,7 +79,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 
 ## 4. Scope
 
-### 4.1 In Scope (system version 1.4.0 — see §11.3 for the version history)
+### 4.1 In Scope (system version 1.4.1 — see §11.3 for the version history)
 
 - Five MCP tools: `get_overview`, `search`, `read_note`, `note`, `propose_edit`.
 - FTS5 (SQLite) keyword search over the vault, chunked at heading boundaries.
@@ -88,7 +89,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 - Operational HTTP endpoints: health check, Prometheus metrics, manual reindex trigger, OAuth protected-resource metadata.
 - An operator-configured `VAULT_BLACKLIST` excluding chosen vault subdirectories from indexing, `read_note`, and `propose_edit` (§9.10).
 
-### 4.2 Out of Scope (system version 1.4.0)
+### 4.2 Out of Scope (system version 1.4.1)
 
 | Item | Why |
 |---|---|
@@ -120,7 +121,7 @@ In this project the first three rows are the same individual; the roles are kept
 - **A3.** The deployment target is a small self-hosted Kubernetes cluster (or Docker Compose for local dev), not a managed cloud platform.
 - **A4.** Cloudflare (or an equivalent edge proxy) sits in front of the public Dex hostname and blocks in-cluster requests to it, which is why `DEX_JWKS_URI` must point at an in-cluster address rather than relying on OIDC discovery (NFR-AUTH-3).
 - **A5.** There is exactly one authenticated principal in practice; the system does not need per-note authorization (see NFR-AUTH-7, `RISKS.md` RISK-6).
-- **C1 (constraint).** `readOnlyRootFilesystem: true` is set on the server's Kubernetes pod; the server process may write only to `DB_PATH`, `OUTBOX_PATH`, and `/tmp`.
+- **C1 (constraint).** `readOnlyRootFilesystem: true` is set on the server's Kubernetes pod; the server process may write only to `DB_PATH`, `OUTBOX_PATH`, `SEARCH_LOG_PATH` (when set), and `/tmp`.
 - **C2 (constraint).** The server container image must not contain a `git` binary or shell out to one (NFR-COM-3, NFR-PROP-1) — this keeps the blast radius of a server-process compromise to "read the vault mirror, write to an outbox," not "push to the vault's git history."
 - **C3 (constraint).** Claude's mobile app UI cannot accept a manually-entered static bearer token, so OAuth 2.1 with PKCE is mandatory, not merely preferred (NFR-AUTH-4).
 
@@ -202,7 +203,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
 | NFR-COM-1 | The server SHALL expose no more than five MCP tools at a time; adding a sixth requires a deliberate, documented design decision, since each tool definition costs ~250 tokens of every session's context and token minimization is this project's core value proposition (§2, G3). | Must | Implemented (`AGENTS.md` hard rule; regression-tested as of v1.6 — `test_exactly_five_tools_registered`) |
-| NFR-COM-2 | `server.py` SHALL write only to `DB_PATH`, `OUTBOX_PATH`, and `/tmp`, remaining compatible with `readOnlyRootFilesystem: true`. | Must | Implemented |
+| NFR-COM-2 | `server.py` SHALL write only to `DB_PATH`, `OUTBOX_PATH`, `SEARCH_LOG_PATH` (when set), and `/tmp`, remaining compatible with `readOnlyRootFilesystem: true`. | Must | Implemented |
 | NFR-COM-3 | `server.py` SHALL contain no `git` subprocess calls or git library usage. | Must | Implemented |
 | NFR-COM-4 | Every tool call SHALL increment a dedicated Prometheus counter `mcp_<tool>_total`, scraped from `/metrics` without authentication. | Must | Implemented |
 | NFR-COM-5 | Read-path tools SHALL reflect the vault state as of the last successful reindex. Worst-case staleness ≈ git-sync pull interval (5 min) + vault-watcher poll interval (30 s) ≈ 5.5 minutes; near-zero after a manual `POST /reindex`. | Should | Implemented |
@@ -238,7 +239,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 | FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase, any double quote inside it doubled. | Must | Implemented |
 | FR-SRCH-5 | If zero rows match after any retry, the tool SHALL return the literal string `"No results."`. | Must | Implemented |
 | FR-SRCH-6 | If fewer than 10 rows match the query as given, the tool SHALL fill the remaining places with rows matching **any** of its words, ordered by `rank`, never repeating a row, and listed after a marker line so they are not mistaken for exact matches. Words are quoted so none reads as FTS5 syntax; common words ("how", "is", "the") are dropped unless nothing else is left. A query that parses as FTS5 and uses its syntax (a phrase, `*`, `^`, a column filter, grouping, `AND`/`OR`/`NOT`/`NEAR`) is not filled: the caller asked for exactly that. Nor is a query that fails to parse but contains `NOT`, since filling would return what it excluded. | Must | Implemented |
-| FR-SRCH-7 | With `SEARCH_LOG_QUERIES=1`, each call SHALL log its query, result count and whether FR-SRCH-6 alone answered it, at INFO. Unset, no query text is logged: a query can reveal as much as the note it looks for. | Should | Implemented |
+| FR-SRCH-7 | With `SEARCH_LOG_PATH` set, each call SHALL append one JSON line (timestamp, query, result count, whether FR-SRCH-6 alone answered it, whether the search failed) to that file, a failed search included, kept owner-only (0600, enforced on an existing file too) and hard-capped at ~1 MB: a line that would cross the cap is not written, and the check and the append are one locked step. Query text SHALL NOT be written to stdout or stderr, set or not: those are shipped to the log store, readable beyond this service. Unset, no query text is recorded. A failed write SHALL NOT fail the search. | Should | Implemented |
 
 **Non-Functional**
 
@@ -454,7 +455,7 @@ This service's HTTP surface is a mix of (a) fixed-convention operational endpoin
 | MCP tool surface (`tools/list` / `tools/call`) | **Versioned per-tool, additively.** Adding a tool (like `propose_edit` in this revision) is a MINOR bump. A breaking change to an existing tool's arguments or return contract would ship as a **new tool name** (e.g. `propose_edit_v2`) rather than mutate the existing contract, so already-deployed clients never silently break. | MCP has no native URL-path versioning; the tool name *is* the addressable unit. |
 | This document | **Semantic versioning via the "System / API version documented" field in Document Control.** MAJOR for any breaking tool contract change or tool removal; MINOR for an additive tool or field; PATCH for description/documentation fixes with no behavior change. | Gives operators and reviewers a single number to diff against when the service changes. |
 
-Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior); **v1.3.0** lets `propose_edit` create new files (FR-PROP-6/9), additive; **v1.3.1** is a bug fix only (NFR-PROP-11), no tool contract change; **v1.4.0** — current — widens `search` with marked partial matches (FR-SRCH-6), its argument unchanged and its result still an excerpt list. No existing tool's arguments changed in any of these bumps. §9.11's new requirements (document v1.12) are not yet implemented and have not moved this number.
+Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior); **v1.3.0** lets `propose_edit` create new files (FR-PROP-6/9), additive; **v1.3.1** is a bug fix only (NFR-PROP-11), no tool contract change; **v1.4.0** widens `search` with marked partial matches (FR-SRCH-6), its argument unchanged and its result still an excerpt list; **v1.4.1** — current — moves the opt-in query log to a file (FR-SRCH-7), a configuration change. No existing tool's arguments changed in any of these bumps. §9.11's new requirements (document v1.12) are not yet implemented and have not moved this number.
 
 Separately, the **MCP protocol version** itself (negotiated during the `initialize` handshake, e.g. a dated string such as `2025-06-18`) is orthogonal to this service's own version number and is determined by the installed `fastmcp`/MCP SDK version, not by this document — the two SHOULD NOT be conflated in future revisions.
 

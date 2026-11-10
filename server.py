@@ -22,10 +22,12 @@ excludes matching notes from indexing, read_note, and propose_edit.
 import asyncio
 import difflib
 import hashlib
+import json
 import logging
 import os
 import re
 import sqlite3
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -51,8 +53,9 @@ DEX_JWKS_URI  = os.environ.get("DEX_JWKS_URI", f"{DEX_ISSUER}/keys")
 MCP_CLIENT_ID = os.environ["MCP_CLIENT_ID"]
 MCP_BASE_URL  = os.environ["MCP_BASE_URL"]
 OUTBOX_PATH   = Path(os.environ.get("OUTBOX_PATH", "/outbox"))
-# FR-SRCH-7: off by default -- a query can say as much as the note it looks for.
-SEARCH_LOG_QUERIES = os.environ.get("SEARCH_LOG_QUERIES", "") == "1"
+# FR-SRCH-7: off by default -- a query can say as much as the note it looks for. A
+# file, never stdout: stdout is shipped to the log store, readable well beyond this pod.
+SEARCH_LOG_PATH = Path(p) if (p := os.environ.get("SEARCH_LOG_PATH")) else None
 
 def _parse_blacklist(raw: str) -> tuple[tuple[str, ...], ...]:
     """FR-BLK-1: comma-separated vault-relative directory prefixes excluded from
@@ -249,6 +252,46 @@ _FTS_SYNTAX = re.compile(r'["*^():]|\b(?:AND|OR|NOT|NEAR)\b')
 PARTIAL_MARKER = "_Partial matches — some of the words:_"
 
 
+# Bounds what an authenticated caller can make the log grow to; ~5,000 queries.
+SEARCH_LOG_MAX_BYTES = 1_000_000
+# Size check and append must be one step, or concurrent searches all pass the check.
+_SEARCH_LOG_LOCK = threading.Lock()
+_search_log_full_warned = False
+
+
+def _log_query(query: str, results: int, widened: bool, error: bool = False) -> None:
+    """FR-SRCH-7: append one JSON line, owner-only, within the cap; never fails the search."""
+    global _search_log_full_warned
+    # ensure_ascii: a lone surrogate in the query would otherwise fail the encode.
+    line = (json.dumps({"ts": datetime.now(UTC).isoformat(timespec="seconds"), "query": query,
+                        "results": results, "widened": widened, "error": error}) + "\n").encode("ascii")
+    try:
+        with _SEARCH_LOG_LOCK:
+            fd = os.open(SEARCH_LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.fchmod(fd, 0o600)  # the create mode does not reach a file that already exists
+                start = os.fstat(fd).st_size
+                if start + len(line) > SEARCH_LOG_MAX_BYTES:
+                    if not _search_log_full_warned:
+                        log.warning("search log full (%d bytes); queries not recorded", SEARCH_LOG_MAX_BYTES)
+                        _search_log_full_warned = True
+                    return
+                try:
+                    written = 0
+                    while written < len(line):  # os.write may write less than asked
+                        n = os.write(fd, line[written:])
+                        if n == 0:
+                            raise OSError("short write")
+                        written += n
+                except OSError:
+                    os.ftruncate(fd, start)  # never leave half a JSON line behind
+                    raise
+            finally:
+                os.close(fd)
+    except OSError as e:
+        log.warning("search log not written: %s", e)
+
+
 # Stopwords are dropped unless nothing else is left; bm25 still ranks a chunk matching
 # more of the words above one matching fewer.
 def _any_term(query: str) -> str | None:
@@ -261,8 +304,11 @@ def _any_term(query: str) -> str | None:
 @mcp.tool()
 def search(query: str) -> str:
     """Search the vault by keyword. Plain-language questions work: chunks containing every word rank first, then chunks containing any of them. Returns up to 10 excerpts (path, heading, ~64-token snippet)."""
+    logged = query  # as given; recorded even if the search fails (FR-SRCH-7)
     try:
         SEARCH_COUNTER.inc()
+        # A lone surrogate cannot be bound into SQLite; the log keeps the query as given.
+        query = query.encode("utf-8", "replace").decode("utf-8")
         with SEARCH_SECONDS.time():
             conn = sqlite3.connect(DB_PATH)
             try:
@@ -288,8 +334,9 @@ def search(query: str) -> str:
                 conn.close()
         if widened:
             SEARCH_WIDENED.inc()
-        if SEARCH_LOG_QUERIES:
-            log.info("search query=%r results=%d widened=%s", query, len(rows) + len(extra), widened)
+        if SEARCH_LOG_PATH:
+            _log_query(logged, len(rows) + len(extra), widened)
+            logged = None
         if not rows and not extra:
             SEARCH_MISSES.inc()
             return "No results."
@@ -301,6 +348,8 @@ def search(query: str) -> str:
         SEARCH_CHARS.inc(len(result))
         return result
     except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
+        if SEARCH_LOG_PATH and logged is not None:
+            _log_query(logged, 0, False, error=True)
         return f"Error: {e}"
 
 

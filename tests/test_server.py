@@ -325,15 +325,98 @@ def test_search_records_latency(tmp_path, monkeypatch):
 
 
 # BRD: FR-SRCH-7
-def test_search_logs_query_only_when_enabled(tmp_path, monkeypatch, caplog):
+def test_search_logs_query_to_file_only_when_enabled(tmp_path, monkeypatch, caplog):
+    import json
     db = _indexed_db(tmp_path, "# Python\n\nPython is great")
     monkeypatch.setattr(server, "DB_PATH", db)
-    caplog.set_level("INFO", logger=server.log.name)
+    caplog.set_level("DEBUG")
     server.search("secret topic")
-    assert "secret topic" not in caplog.text
-    monkeypatch.setattr(server, "SEARCH_LOG_QUERIES", True)
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
     server.search("python question")
-    assert "python question" in caplog.text
+    entries = [json.loads(line) for line in logfile.read_text().splitlines()]
+    assert [e["query"] for e in entries] == ["python question"]
+    assert entries[0]["results"] == 1
+    # Query text never reaches stdout/stderr logging, enabled or not.
+    assert "secret topic" not in caplog.text and "python question" not in caplog.text
+
+
+# BRD: FR-SRCH-7
+def test_search_log_is_owner_only_capped_and_safe(tmp_path, monkeypatch):
+    import json
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    server._log_query("python \ud800", 1, False)  # lone surrogate: must not raise
+    assert json.loads(logfile.read_text())["query"] == "python \ud800"
+    assert logfile.stat().st_mode & 0o777 == 0o600
+    monkeypatch.setattr(server, "SEARCH_LOG_MAX_BYTES", logfile.stat().st_size)
+    server.search("python again")
+    assert "again" not in logfile.read_text()
+
+
+# BRD: FR-SRCH-7
+def test_search_log_tightens_existing_file_and_never_crosses_cap(tmp_path, monkeypatch):
+    logfile = tmp_path / "queries.jsonl"
+    logfile.write_text("")
+    logfile.chmod(0o644)
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    server._log_query("first", 1, False)
+    assert logfile.stat().st_mode & 0o777 == 0o600
+    size = logfile.stat().st_size
+    monkeypatch.setattr(server, "SEARCH_LOG_MAX_BYTES", size + 10)
+    server._log_query("a query longer than the ten bytes left", 1, False)
+    assert logfile.stat().st_size == size
+
+
+# BRD: FR-SRCH-7
+def test_failed_search_is_still_logged(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "no-index.db")  # no chunks_fts table
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    assert server.search("python").startswith("Error")
+    entries = [json.loads(line) for line in logfile.read_text().splitlines()]
+    assert entries == [{**entries[0], "query": "python", "results": 0, "error": True}]
+
+
+# BRD: FR-SRCH-7
+def test_search_log_rolls_back_a_partial_write(tmp_path, monkeypatch):
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    server._log_query("kept", 1, False)
+    before = logfile.read_bytes()
+    real_write, calls = server.os.write, []
+
+    def short_then_fail(fd, data):
+        calls.append(len(data))
+        if len(calls) == 1:
+            return real_write(fd, data[:5])  # short write
+        raise OSError("disk full")
+    monkeypatch.setattr(server.os, "write", short_then_fail)
+    server._log_query("lost", 1, False)
+    monkeypatch.setattr(server.os, "write", real_write)
+    assert logfile.read_bytes() == before
+
+
+# BRD: FR-SRCH-7, NFR-SRCH-4
+def test_search_with_lone_surrogate_completes_and_logs_it(tmp_path, monkeypatch):
+    import json
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    assert "note.md" in server.search("python \ud800")
+    assert json.loads(logfile.read_text())["query"] == "python \ud800"
+
+
+# BRD: FR-SRCH-7
+def test_search_survives_unwritable_log(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", tmp_path / "missing-dir" / "q.jsonl")
+    assert "note.md" in server.search("python")
 
 # ── read_note ─────────────────────────────────────────────────────────────────
 

@@ -13,7 +13,7 @@
 
 The miss rate stopped being a trigger once `search` fills with any-word matches (FR-SRCH-6): a query sharing one word with the vault now returns something, relevant or not. Recall is measured instead (BRD §14):
 
-1. Run with `SEARCH_LOG_QUERIES=1` until ~30 real questions are logged.
+1. Run with `SEARCH_LOG_PATH` set until ~30 real questions are logged.
 2. Pair each with the section that answers it. Freeze the set before scoring it.
 3. Score recall@5 on the current search: that is the baseline. Phase 1b ships only if it beats it on the same set.
 

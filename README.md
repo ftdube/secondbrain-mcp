@@ -78,7 +78,7 @@ VAULT_PATH=/path/to/vault docker compose up mcp
 | `OUTBOX_PATH` | no | Directory where `note`/`propose_edit` write files for push-sync (default: `/outbox`) |
 | `AUTH_PUBLIC_EXTRA` | no | Comma-separated paths to add to the public (no-auth) list |
 | `VAULT_BLACKLIST` | no | Comma-separated vault-relative directory prefixes excluded from indexing, `read_note`, and `propose_edit` (e.g. `Private/Journal,Restricted/Notes`) |
-| `SEARCH_LOG_QUERIES` | no | `1` logs each search's query text, result count and whether only any-word matching answered it. Off by default |
+| `SEARCH_LOG_PATH` | no | File to append each search's query text, result count and whether only any-word matching answered it, as JSON lines. Never logged to stdout. Unset by default |
 
 ## Endpoints
 

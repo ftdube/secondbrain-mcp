@@ -8,7 +8,7 @@ Self-hosted MCP server giving Claude mobile access to an Obsidian vault via 5 to
 ## Hard rules
 - **5 tools** — do not add one without a deliberate design decision; each costs ~250 tokens per session (NFR-COM-1)
 - **FTS5 only until Phase 1b** — no embeddings, no sqlite-vec, no ONNX imports
-- **`readOnlyRootFilesystem: true`** in K8s — `server.py` must not write outside `DB_PATH`, `OUTBOX_PATH` and `/tmp`
+- **`readOnlyRootFilesystem: true`** in K8s — `server.py` must not write outside `DB_PATH`, `OUTBOX_PATH`, `SEARCH_LOG_PATH` and `/tmp`
 - **Public auth paths** (FR-AUTH-2) always skip JWT validation — do not remove them; extras go in the `AUTH_PUBLIC_EXTRA` env var
 - **`note` writes to the outbox only**, never the vault; the push-sync sidecar commits and pushes
 - **`propose_edit` never touches the vault or git** — it emits a diff to the outbox; push-sync routes `*.patch.md` to `Proposals/`

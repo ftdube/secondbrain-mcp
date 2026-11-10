@@ -79,7 +79,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 
 ## 4. Scope
 
-### 4.1 In Scope (system version 1.4.0 — see §11.3 for the version history)
+### 4.1 In Scope (system version 1.4.1 — see §11.3 for the version history)
 
 - Five MCP tools: `get_overview`, `search`, `read_note`, `note`, `propose_edit`.
 - FTS5 (SQLite) keyword search over the vault, chunked at heading boundaries.
@@ -89,7 +89,7 @@ Option 1 was rejected: the generic 11-tool surface costs approximately 10,000 to
 - Operational HTTP endpoints: health check, Prometheus metrics, manual reindex trigger, OAuth protected-resource metadata.
 - An operator-configured `VAULT_BLACKLIST` excluding chosen vault subdirectories from indexing, `read_note`, and `propose_edit` (§9.10).
 
-### 4.2 Out of Scope (system version 1.4.0)
+### 4.2 Out of Scope (system version 1.4.1)
 
 | Item | Why |
 |---|---|
@@ -239,7 +239,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 | FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase, any double quote inside it doubled. | Must | Implemented |
 | FR-SRCH-5 | If zero rows match after any retry, the tool SHALL return the literal string `"No results."`. | Must | Implemented |
 | FR-SRCH-6 | If fewer than 10 rows match the query as given, the tool SHALL fill the remaining places with rows matching **any** of its words, ordered by `rank`, never repeating a row, and listed after a marker line so they are not mistaken for exact matches. Words are quoted so none reads as FTS5 syntax; common words ("how", "is", "the") are dropped unless nothing else is left. A query that parses as FTS5 and uses its syntax (a phrase, `*`, `^`, a column filter, grouping, `AND`/`OR`/`NOT`/`NEAR`) is not filled: the caller asked for exactly that. Nor is a query that fails to parse but contains `NOT`, since filling would return what it excluded. | Must | Implemented |
-| FR-SRCH-7 | With `SEARCH_LOG_PATH` set, each call SHALL append one JSON line (timestamp, query, result count, whether FR-SRCH-6 alone answered it) to that file. Query text SHALL NOT be written to stdout or stderr, set or not: those are shipped to the log store, readable beyond this service. Unset, no query text is recorded. A failed write SHALL NOT fail the search. | Should | Implemented |
+| FR-SRCH-7 | With `SEARCH_LOG_PATH` set, each call SHALL append one JSON line (timestamp, query, result count, whether FR-SRCH-6 alone answered it) to that file, created owner-only (0600) and capped at ~1 MB, past which queries are not recorded. Query text SHALL NOT be written to stdout or stderr, set or not: those are shipped to the log store, readable beyond this service. Unset, no query text is recorded. A failed write SHALL NOT fail the search. | Should | Implemented |
 
 **Non-Functional**
 
@@ -455,7 +455,7 @@ This service's HTTP surface is a mix of (a) fixed-convention operational endpoin
 | MCP tool surface (`tools/list` / `tools/call`) | **Versioned per-tool, additively.** Adding a tool (like `propose_edit` in this revision) is a MINOR bump. A breaking change to an existing tool's arguments or return contract would ship as a **new tool name** (e.g. `propose_edit_v2`) rather than mutate the existing contract, so already-deployed clients never silently break. | MCP has no native URL-path versioning; the tool name *is* the addressable unit. |
 | This document | **Semantic versioning via the "System / API version documented" field in Document Control.** MAJOR for any breaking tool contract change or tool removal; MINOR for an additive tool or field; PATCH for description/documentation fixes with no behavior change. | Gives operators and reviewers a single number to diff against when the service changes. |
 
-Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior); **v1.3.0** lets `propose_edit` create new files (FR-PROP-6/9), additive; **v1.3.1** is a bug fix only (NFR-PROP-11), no tool contract change; **v1.4.0** — current — widens `search` with marked partial matches (FR-SRCH-6), its argument unchanged and its result still an excerpt list. No existing tool's arguments changed in any of these bumps. §9.11's new requirements (document v1.12) are not yet implemented and have not moved this number.
+Under this policy: **v1.0.0** denotes the original four-tool Phase 1a service (already deployed per `next-steps.md`); **v1.1.0** adds `propose_edit` (including F8) as a strictly additive, non-breaking capability; **v1.2.0** adds `VAULT_BLACKLIST` (§9.10), also additive and non-breaking (NFR-BLK-2: unset is exactly prior behavior); **v1.3.0** lets `propose_edit` create new files (FR-PROP-6/9), additive; **v1.3.1** is a bug fix only (NFR-PROP-11), no tool contract change; **v1.4.0** widens `search` with marked partial matches (FR-SRCH-6), its argument unchanged and its result still an excerpt list; **v1.4.1** — current — moves the opt-in query log to a file (FR-SRCH-7), a configuration change. No existing tool's arguments changed in any of these bumps. §9.11's new requirements (document v1.12) are not yet implemented and have not moved this number.
 
 Separately, the **MCP protocol version** itself (negotiated during the `initialize` handshake, e.g. a dated string such as `2025-06-18`) is orthogonal to this service's own version number and is determined by the installed `fastmcp`/MCP SDK version, not by this document — the two SHOULD NOT be conflated in future revisions.
 

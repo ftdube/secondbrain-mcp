@@ -251,19 +251,28 @@ _FTS_SYNTAX = re.compile(r'["*^():]|\b(?:AND|OR|NOT|NEAR)\b')
 PARTIAL_MARKER = "_Partial matches — some of the words:_"
 
 
-# Stopwords are dropped unless nothing else is left; bm25 still ranks a chunk matching
-# more of the words above one matching fewer.
+# Bounds what an authenticated caller can make the log grow to; ~5,000 queries.
+SEARCH_LOG_MAX_BYTES = 1_000_000
+
+
 def _log_query(query: str, results: int, widened: bool) -> None:
-    """FR-SRCH-7: append one JSON line; a failed write never fails the search."""
-    entry = {"ts": datetime.now(UTC).isoformat(timespec="seconds"), "query": query,
-             "results": results, "widened": widened}
+    """FR-SRCH-7: append one JSON line, owner-only; a failed write never fails the search."""
+    # ensure_ascii: a lone surrogate in the query would otherwise fail the encode.
+    line = json.dumps({"ts": datetime.now(UTC).isoformat(timespec="seconds"), "query": query,
+                       "results": results, "widened": widened}) + "\n"
     try:
-        with SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    except OSError as e:
+        if SEARCH_LOG_PATH.exists() and SEARCH_LOG_PATH.stat().st_size >= SEARCH_LOG_MAX_BYTES:
+            log.warning("search log full (%d bytes); query not recorded", SEARCH_LOG_MAX_BYTES)
+            return
+        fd = os.open(SEARCH_LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+        with os.fdopen(fd, "a", encoding="ascii") as f:
+            f.write(line)
+    except (OSError, ValueError) as e:
         log.warning("search log not written: %s", e)
 
 
+# Stopwords are dropped unless nothing else is left; bm25 still ranks a chunk matching
+# more of the words above one matching fewer.
 def _any_term(query: str) -> str | None:
     """FR-SRCH-6: the query's words, each quoted so none reads as FTS5 syntax, joined with OR."""
     words = re.findall(r"\w+", query.lower())

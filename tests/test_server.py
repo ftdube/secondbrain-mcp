@@ -342,6 +342,21 @@ def test_search_logs_query_to_file_only_when_enabled(tmp_path, monkeypatch, capl
 
 
 # BRD: FR-SRCH-7
+def test_search_log_is_owner_only_capped_and_safe(tmp_path, monkeypatch):
+    import json
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    assert "note.md" in server.search("python \ud800")  # lone surrogate
+    assert json.loads(logfile.read_text())["query"] == "python \ud800"
+    assert logfile.stat().st_mode & 0o777 == 0o600
+    monkeypatch.setattr(server, "SEARCH_LOG_MAX_BYTES", logfile.stat().st_size)
+    server.search("python again")
+    assert "again" not in logfile.read_text()
+
+
+# BRD: FR-SRCH-7
 def test_search_survives_unwritable_log(tmp_path, monkeypatch):
     db = _indexed_db(tmp_path, "# Python\n\nPython is great")
     monkeypatch.setattr(server, "DB_PATH", db)

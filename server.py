@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import sqlite3
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -253,21 +254,31 @@ PARTIAL_MARKER = "_Partial matches — some of the words:_"
 
 # Bounds what an authenticated caller can make the log grow to; ~5,000 queries.
 SEARCH_LOG_MAX_BYTES = 1_000_000
+# Size check and append must be one step, or concurrent searches all pass the check.
+_SEARCH_LOG_LOCK = threading.Lock()
+_search_log_full_warned = False
 
 
 def _log_query(query: str, results: int, widened: bool) -> None:
-    """FR-SRCH-7: append one JSON line, owner-only; a failed write never fails the search."""
+    """FR-SRCH-7: append one JSON line, owner-only, within the cap; never fails the search."""
+    global _search_log_full_warned
     # ensure_ascii: a lone surrogate in the query would otherwise fail the encode.
-    line = json.dumps({"ts": datetime.now(UTC).isoformat(timespec="seconds"), "query": query,
-                       "results": results, "widened": widened}) + "\n"
+    line = (json.dumps({"ts": datetime.now(UTC).isoformat(timespec="seconds"), "query": query,
+                        "results": results, "widened": widened}) + "\n").encode("ascii")
     try:
-        if SEARCH_LOG_PATH.exists() and SEARCH_LOG_PATH.stat().st_size >= SEARCH_LOG_MAX_BYTES:
-            log.warning("search log full (%d bytes); query not recorded", SEARCH_LOG_MAX_BYTES)
-            return
-        fd = os.open(SEARCH_LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        with os.fdopen(fd, "a", encoding="ascii") as f:
-            f.write(line)
-    except (OSError, ValueError) as e:
+        with _SEARCH_LOG_LOCK:
+            fd = os.open(SEARCH_LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+            try:
+                os.fchmod(fd, 0o600)  # the create mode does not reach a file that already exists
+                if os.fstat(fd).st_size + len(line) > SEARCH_LOG_MAX_BYTES:
+                    if not _search_log_full_warned:
+                        log.warning("search log full (%d bytes); queries not recorded", SEARCH_LOG_MAX_BYTES)
+                        _search_log_full_warned = True
+                    return
+                os.write(fd, line)
+            finally:
+                os.close(fd)
+    except OSError as e:
         log.warning("search log not written: %s", e)
 
 
@@ -285,6 +296,8 @@ def search(query: str) -> str:
     """Search the vault by keyword. Plain-language questions work: chunks containing every word rank first, then chunks containing any of them. Returns up to 10 excerpts (path, heading, ~64-token snippet)."""
     try:
         SEARCH_COUNTER.inc()
+        # A lone surrogate cannot be bound into SQLite; the log keeps the query as given.
+        logged, query = query, query.encode("utf-8", "replace").decode("utf-8")
         with SEARCH_SECONDS.time():
             conn = sqlite3.connect(DB_PATH)
             try:
@@ -311,7 +324,7 @@ def search(query: str) -> str:
         if widened:
             SEARCH_WIDENED.inc()
         if SEARCH_LOG_PATH:
-            _log_query(query, len(rows) + len(extra), widened)
+            _log_query(logged, len(rows) + len(extra), widened)
         if not rows and not extra:
             SEARCH_MISSES.inc()
             return "No results."

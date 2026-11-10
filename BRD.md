@@ -121,7 +121,7 @@ In this project the first three rows are the same individual; the roles are kept
 - **A3.** The deployment target is a small self-hosted Kubernetes cluster (or Docker Compose for local dev), not a managed cloud platform.
 - **A4.** Cloudflare (or an equivalent edge proxy) sits in front of the public Dex hostname and blocks in-cluster requests to it, which is why `DEX_JWKS_URI` must point at an in-cluster address rather than relying on OIDC discovery (NFR-AUTH-3).
 - **A5.** There is exactly one authenticated principal in practice; the system does not need per-note authorization (see NFR-AUTH-7, `RISKS.md` RISK-6).
-- **C1 (constraint).** `readOnlyRootFilesystem: true` is set on the server's Kubernetes pod; the server process may write only to `DB_PATH`, `OUTBOX_PATH`, and `/tmp`.
+- **C1 (constraint).** `readOnlyRootFilesystem: true` is set on the server's Kubernetes pod; the server process may write only to `DB_PATH`, `OUTBOX_PATH`, `SEARCH_LOG_PATH` (when set), and `/tmp`.
 - **C2 (constraint).** The server container image must not contain a `git` binary or shell out to one (NFR-COM-3, NFR-PROP-1) — this keeps the blast radius of a server-process compromise to "read the vault mirror, write to an outbox," not "push to the vault's git history."
 - **C3 (constraint).** Claude's mobile app UI cannot accept a manually-entered static bearer token, so OAuth 2.1 with PKCE is mandatory, not merely preferred (NFR-AUTH-4).
 
@@ -203,7 +203,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 | ID | Requirement | Priority | Status |
 |---|---|---|---|
 | NFR-COM-1 | The server SHALL expose no more than five MCP tools at a time; adding a sixth requires a deliberate, documented design decision, since each tool definition costs ~250 tokens of every session's context and token minimization is this project's core value proposition (§2, G3). | Must | Implemented (`AGENTS.md` hard rule; regression-tested as of v1.6 — `test_exactly_five_tools_registered`) |
-| NFR-COM-2 | `server.py` SHALL write only to `DB_PATH`, `OUTBOX_PATH`, and `/tmp`, remaining compatible with `readOnlyRootFilesystem: true`. | Must | Implemented |
+| NFR-COM-2 | `server.py` SHALL write only to `DB_PATH`, `OUTBOX_PATH`, `SEARCH_LOG_PATH` (when set), and `/tmp`, remaining compatible with `readOnlyRootFilesystem: true`. | Must | Implemented |
 | NFR-COM-3 | `server.py` SHALL contain no `git` subprocess calls or git library usage. | Must | Implemented |
 | NFR-COM-4 | Every tool call SHALL increment a dedicated Prometheus counter `mcp_<tool>_total`, scraped from `/metrics` without authentication. | Must | Implemented |
 | NFR-COM-5 | Read-path tools SHALL reflect the vault state as of the last successful reindex. Worst-case staleness ≈ git-sync pull interval (5 min) + vault-watcher poll interval (30 s) ≈ 5.5 minutes; near-zero after a manual `POST /reindex`. | Should | Implemented |
@@ -239,7 +239,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 | FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase, any double quote inside it doubled. | Must | Implemented |
 | FR-SRCH-5 | If zero rows match after any retry, the tool SHALL return the literal string `"No results."`. | Must | Implemented |
 | FR-SRCH-6 | If fewer than 10 rows match the query as given, the tool SHALL fill the remaining places with rows matching **any** of its words, ordered by `rank`, never repeating a row, and listed after a marker line so they are not mistaken for exact matches. Words are quoted so none reads as FTS5 syntax; common words ("how", "is", "the") are dropped unless nothing else is left. A query that parses as FTS5 and uses its syntax (a phrase, `*`, `^`, a column filter, grouping, `AND`/`OR`/`NOT`/`NEAR`) is not filled: the caller asked for exactly that. Nor is a query that fails to parse but contains `NOT`, since filling would return what it excluded. | Must | Implemented |
-| FR-SRCH-7 | With `SEARCH_LOG_PATH` set, each call SHALL append one JSON line (timestamp, query, result count, whether FR-SRCH-6 alone answered it) to that file, created owner-only (0600) and capped at ~1 MB, past which queries are not recorded. Query text SHALL NOT be written to stdout or stderr, set or not: those are shipped to the log store, readable beyond this service. Unset, no query text is recorded. A failed write SHALL NOT fail the search. | Should | Implemented |
+| FR-SRCH-7 | With `SEARCH_LOG_PATH` set, each call SHALL append one JSON line (timestamp, query, result count, whether FR-SRCH-6 alone answered it) to that file, kept owner-only (0600, enforced on an existing file too) and hard-capped at ~1 MB: a line that would cross the cap is not written, and the check and the append are one locked step. Query text SHALL NOT be written to stdout or stderr, set or not: those are shipped to the log store, readable beyond this service. Unset, no query text is recorded. A failed write SHALL NOT fail the search. | Should | Implemented |
 
 **Non-Functional**
 

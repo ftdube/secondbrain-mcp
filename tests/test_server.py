@@ -357,6 +357,31 @@ def test_search_log_is_owner_only_capped_and_safe(tmp_path, monkeypatch):
 
 
 # BRD: FR-SRCH-7
+def test_search_log_tightens_existing_file_and_never_crosses_cap(tmp_path, monkeypatch):
+    logfile = tmp_path / "queries.jsonl"
+    logfile.write_text("")
+    logfile.chmod(0o644)
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    server._log_query("first", 1, False)
+    assert logfile.stat().st_mode & 0o777 == 0o600
+    size = logfile.stat().st_size
+    monkeypatch.setattr(server, "SEARCH_LOG_MAX_BYTES", size + 10)
+    server._log_query("a query longer than the ten bytes left", 1, False)
+    assert logfile.stat().st_size == size
+
+
+# BRD: FR-SRCH-7, NFR-SRCH-4
+def test_search_with_lone_surrogate_completes_and_logs_it(tmp_path, monkeypatch):
+    import json
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    assert "note.md" in server.search("python \ud800")
+    assert json.loads(logfile.read_text())["query"] == "python \ud800"
+
+
+# BRD: FR-SRCH-7
 def test_search_survives_unwritable_log(tmp_path, monkeypatch):
     db = _indexed_db(tmp_path, "# Python\n\nPython is great")
     monkeypatch.setattr(server, "DB_PATH", db)

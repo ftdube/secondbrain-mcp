@@ -370,6 +370,25 @@ def test_search_log_tightens_existing_file_and_never_crosses_cap(tmp_path, monke
     assert logfile.stat().st_size == size
 
 
+# BRD: FR-SRCH-7
+def test_search_log_rolls_back_a_partial_write(tmp_path, monkeypatch):
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
+    server._log_query("kept", 1, False)
+    before = logfile.read_bytes()
+    real_write, calls = server.os.write, []
+
+    def short_then_fail(fd, data):
+        calls.append(len(data))
+        if len(calls) == 1:
+            return real_write(fd, data[:5])  # short write
+        raise OSError("disk full")
+    monkeypatch.setattr(server.os, "write", short_then_fail)
+    server._log_query("lost", 1, False)
+    monkeypatch.setattr(server.os, "write", real_write)
+    assert logfile.read_bytes() == before
+
+
 # BRD: FR-SRCH-7, NFR-SRCH-4
 def test_search_with_lone_surrogate_completes_and_logs_it(tmp_path, monkeypatch):
     import json

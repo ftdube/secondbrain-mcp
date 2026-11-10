@@ -270,12 +270,22 @@ def _log_query(query: str, results: int, widened: bool) -> None:
             fd = os.open(SEARCH_LOG_PATH, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
             try:
                 os.fchmod(fd, 0o600)  # the create mode does not reach a file that already exists
-                if os.fstat(fd).st_size + len(line) > SEARCH_LOG_MAX_BYTES:
+                start = os.fstat(fd).st_size
+                if start + len(line) > SEARCH_LOG_MAX_BYTES:
                     if not _search_log_full_warned:
                         log.warning("search log full (%d bytes); queries not recorded", SEARCH_LOG_MAX_BYTES)
                         _search_log_full_warned = True
                     return
-                os.write(fd, line)
+                try:
+                    written = 0
+                    while written < len(line):  # os.write may write less than asked
+                        n = os.write(fd, line[written:])
+                        if n == 0:
+                            raise OSError("short write")
+                        written += n
+                except OSError:
+                    os.ftruncate(fd, start)  # never leave half a JSON line behind
+                    raise
             finally:
                 os.close(fd)
     except OSError as e:

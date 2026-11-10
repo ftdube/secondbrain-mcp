@@ -5,9 +5,9 @@
 | Field | Value |
 |---|---|
 | Document title | Business Requirements Document — SecondBrain MCP Server |
-| Document version | 1.15 (Draft) |
-| System / API version documented | 1.4.0 |
-| Date | 2026-11-09 |
+| Document version | 1.16 (Draft) |
+| System / API version documented | 1.4.1 |
+| Date | 2026-11-10 |
 | Author | Claude Code, on behalf of the repository owner |
 | Classification | Public (repository is open-source; see §6 for redaction policy) |
 | Related artifacts | [`AGENTS.md`](AGENTS.md), [`REBUILD.md`](REBUILD.md), [`RISKS.md`](RISKS.md), [`README.md`](README.md), [`next-steps.md`](next-steps.md), [GitHub Issues](https://github.com/ftdube/secondbrain-mcp/issues) |
@@ -32,6 +32,7 @@
 | 1.13 | 2026-08-26 | Implemented NFR-SEC-7 (issue #58): `git-sync` now uses a separate read-only SSH key via `GITSYNC_SSH_KEY_PATH`. Updated `README.md` with key generation instructions. |
 | 1.14 | 2026-10-07 | `agents.md` renamed `AGENTS.md` (its `claude.md`/`gemini.md` symlinks removed); `REBUILD.md` added. No requirement changed. |
 | 1.15 | 2026-11-09 | `search` recall. Every query term had to occur in one chunk, so a question asked in plain language missed (33–47% of searches over 7–90 days). Changed FR-SRCH-1 (note title indexed), FR-SRCH-2, FR-SRCH-3 (~64-token snippet), FR-SRCH-4 (inner quotes doubled), NFR-SRCH-2, NFR-SRCH-3 (the miss rate no longer triggers Phase 1b) and the §14 quality gate; added FR-SRCH-6 (any-term fill), FR-SRCH-7 (opt-in query log), NFR-SRCH-7 (latency histogram). System version → 1.4.0. |
+| 1.16 | 2026-11-10 | FR-SRCH-7: the query log goes to a file named by `SEARCH_LOG_PATH`, never to stdout, which the deployment ships to an unauthenticated log store. `SEARCH_LOG_QUERIES` removed before any deployment set it. System version → 1.4.1. |
 
 Detail for versions 1.0–1.8 beyond this one-line summary lives in git history (`git log -- BRD.md`) and the PRs that shipped each change — not duplicated here, per the hard rule this revision introduces.
 
@@ -238,7 +239,7 @@ As of document v1.12, the following are excused from that requirement as inheren
 | FR-SRCH-4 | If the raw query is not valid FTS5 syntax, the tool SHALL retry once with the query wrapped in double quotes as a literal phrase, any double quote inside it doubled. | Must | Implemented |
 | FR-SRCH-5 | If zero rows match after any retry, the tool SHALL return the literal string `"No results."`. | Must | Implemented |
 | FR-SRCH-6 | If fewer than 10 rows match the query as given, the tool SHALL fill the remaining places with rows matching **any** of its words, ordered by `rank`, never repeating a row, and listed after a marker line so they are not mistaken for exact matches. Words are quoted so none reads as FTS5 syntax; common words ("how", "is", "the") are dropped unless nothing else is left. A query that parses as FTS5 and uses its syntax (a phrase, `*`, `^`, a column filter, grouping, `AND`/`OR`/`NOT`/`NEAR`) is not filled: the caller asked for exactly that. Nor is a query that fails to parse but contains `NOT`, since filling would return what it excluded. | Must | Implemented |
-| FR-SRCH-7 | With `SEARCH_LOG_QUERIES=1`, each call SHALL log its query, result count and whether FR-SRCH-6 alone answered it, at INFO. Unset, no query text is logged: a query can reveal as much as the note it looks for. | Should | Implemented |
+| FR-SRCH-7 | With `SEARCH_LOG_PATH` set, each call SHALL append one JSON line (timestamp, query, result count, whether FR-SRCH-6 alone answered it) to that file. Query text SHALL NOT be written to stdout or stderr, set or not: those are shipped to the log store, readable beyond this service. Unset, no query text is recorded. A failed write SHALL NOT fail the search. | Should | Implemented |
 
 **Non-Functional**
 

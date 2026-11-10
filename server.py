@@ -22,6 +22,7 @@ excludes matching notes from indexing, read_note, and propose_edit.
 import asyncio
 import difflib
 import hashlib
+import json
 import logging
 import os
 import re
@@ -51,8 +52,9 @@ DEX_JWKS_URI  = os.environ.get("DEX_JWKS_URI", f"{DEX_ISSUER}/keys")
 MCP_CLIENT_ID = os.environ["MCP_CLIENT_ID"]
 MCP_BASE_URL  = os.environ["MCP_BASE_URL"]
 OUTBOX_PATH   = Path(os.environ.get("OUTBOX_PATH", "/outbox"))
-# FR-SRCH-7: off by default -- a query can say as much as the note it looks for.
-SEARCH_LOG_QUERIES = os.environ.get("SEARCH_LOG_QUERIES", "") == "1"
+# FR-SRCH-7: off by default -- a query can say as much as the note it looks for. A
+# file, never stdout: stdout is shipped to the log store, readable well beyond this pod.
+SEARCH_LOG_PATH = Path(p) if (p := os.environ.get("SEARCH_LOG_PATH")) else None
 
 def _parse_blacklist(raw: str) -> tuple[tuple[str, ...], ...]:
     """FR-BLK-1: comma-separated vault-relative directory prefixes excluded from
@@ -251,6 +253,17 @@ PARTIAL_MARKER = "_Partial matches — some of the words:_"
 
 # Stopwords are dropped unless nothing else is left; bm25 still ranks a chunk matching
 # more of the words above one matching fewer.
+def _log_query(query: str, results: int, widened: bool) -> None:
+    """FR-SRCH-7: append one JSON line; a failed write never fails the search."""
+    entry = {"ts": datetime.now(UTC).isoformat(timespec="seconds"), "query": query,
+             "results": results, "widened": widened}
+    try:
+        with SEARCH_LOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    except OSError as e:
+        log.warning("search log not written: %s", e)
+
+
 def _any_term(query: str) -> str | None:
     """FR-SRCH-6: the query's words, each quoted so none reads as FTS5 syntax, joined with OR."""
     words = re.findall(r"\w+", query.lower())
@@ -288,8 +301,8 @@ def search(query: str) -> str:
                 conn.close()
         if widened:
             SEARCH_WIDENED.inc()
-        if SEARCH_LOG_QUERIES:
-            log.info("search query=%r results=%d widened=%s", query, len(rows) + len(extra), widened)
+        if SEARCH_LOG_PATH:
+            _log_query(query, len(rows) + len(extra), widened)
         if not rows and not extra:
             SEARCH_MISSES.inc()
             return "No results."

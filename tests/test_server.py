@@ -325,15 +325,28 @@ def test_search_records_latency(tmp_path, monkeypatch):
 
 
 # BRD: FR-SRCH-7
-def test_search_logs_query_only_when_enabled(tmp_path, monkeypatch, caplog):
+def test_search_logs_query_to_file_only_when_enabled(tmp_path, monkeypatch, caplog):
+    import json
     db = _indexed_db(tmp_path, "# Python\n\nPython is great")
     monkeypatch.setattr(server, "DB_PATH", db)
-    caplog.set_level("INFO", logger=server.log.name)
+    caplog.set_level("DEBUG")
     server.search("secret topic")
-    assert "secret topic" not in caplog.text
-    monkeypatch.setattr(server, "SEARCH_LOG_QUERIES", True)
+    logfile = tmp_path / "queries.jsonl"
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", logfile)
     server.search("python question")
-    assert "python question" in caplog.text
+    entries = [json.loads(line) for line in logfile.read_text().splitlines()]
+    assert [e["query"] for e in entries] == ["python question"]
+    assert entries[0]["results"] == 1
+    # Query text never reaches stdout/stderr logging, enabled or not.
+    assert "secret topic" not in caplog.text and "python question" not in caplog.text
+
+
+# BRD: FR-SRCH-7
+def test_search_survives_unwritable_log(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    monkeypatch.setattr(server, "SEARCH_LOG_PATH", tmp_path / "missing-dir" / "q.jsonl")
+    assert "note.md" in server.search("python")
 
 # ── read_note ─────────────────────────────────────────────────────────────────
 

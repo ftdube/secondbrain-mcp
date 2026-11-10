@@ -30,7 +30,7 @@ Five tools:
 | Tool | Returns |
 |---|---|
 | `get_overview()` | `context.md` + `_map.md` — called once per session |
-| `search(query)` | Top 10 FTS5 excerpts (path + heading + ~200 chars) |
+| `search(query)` | Top 10 FTS5 excerpts (path + heading + ~64-token snippet): chunks matching every word first, then any word |
 | `read_note(path, offset=0)` | Note by vault-relative path; paginated past ~20,000 chars |
 | `note(title, content)` | Saves a draft note to `Inbox/` for later review in Obsidian |
 | `propose_edit(edits, rationale)` | Drafts a reviewable diff against one or more notes, existing or new, saved to `Proposals/` — never writes the vault directly |
@@ -78,6 +78,7 @@ VAULT_PATH=/path/to/vault docker compose up mcp
 | `OUTBOX_PATH` | no | Directory where `note`/`propose_edit` write files for push-sync (default: `/outbox`) |
 | `AUTH_PUBLIC_EXTRA` | no | Comma-separated paths to add to the public (no-auth) list |
 | `VAULT_BLACKLIST` | no | Comma-separated vault-relative directory prefixes excluded from indexing, `read_note`, and `propose_edit` (e.g. `Private/Journal,Restricted/Notes`) |
+| `SEARCH_LOG_QUERIES` | no | `1` logs each search's query text, result count and whether only any-word matching answered it. Off by default |
 
 ## Endpoints
 
@@ -100,6 +101,8 @@ The `/metrics` endpoint exposes Prometheus counters. Point a Prometheus scrape j
 | `mcp_reads_total` | `read_note` calls |
 | `mcp_propose_edits_total` | `propose_edit` calls |
 | `mcp_search_misses_total` | `search` calls that returned no results |
+| `mcp_search_widened_total` | `search` calls no chunk matched on every word, answered by any-word matching |
+| `mcp_search_seconds` | `search` latency (histogram) |
 | `mcp_overview_chars_total` | Characters returned by `get_overview` |
 | `mcp_search_chars_total` | Characters returned by `search` |
 | `mcp_read_chars_total` | Characters returned by `read_note` |
@@ -116,9 +119,14 @@ Approximate tokens returned per tool (chars ÷ 4):
 rate(mcp_search_chars_total[5m]) / 4
 ```
 
-Search miss rate (useful for deciding when to upgrade to hybrid search):
+Share of searches answered only by any-word matching (diagnostic; the Phase 1b trigger is in `next-steps.md`):
 ```promql
-rate(mcp_search_misses_total[1h]) / rate(mcp_searches_total[1h])
+rate(mcp_search_widened_total[1h]) / rate(mcp_searches_total[1h])
+```
+
+Search latency, 95th percentile:
+```promql
+histogram_quantile(0.95, sum(rate(mcp_search_seconds_bucket[1h])) by (le))
 ```
 
 ## Deployment

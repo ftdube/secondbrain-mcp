@@ -137,6 +137,204 @@ def test_search_fts_syntax_fallback(tmp_path, monkeypatch):
     assert isinstance(result, str)
 
 
+
+def _indexed_vault(tmp_path, notes: dict[str, str]):
+    vault = tmp_path / "vault"
+    for rel, content in notes.items():
+        (vault / rel).parent.mkdir(parents=True, exist_ok=True)
+        (vault / rel).write_text(content)
+    db = tmp_path / "index.db"
+    server.build_index(vault, db)
+    return db
+
+
+def _paths(result: str) -> list[str]:
+    return re.findall(r"^\*\*(.+?)\*\* — ", result, re.M)
+
+
+# BRD: FR-SRCH-6
+def test_search_plain_language_question_widens(tmp_path, monkeypatch):
+    # No chunk holds every word ("how", "is", "updated" never occur), which used to
+    # return "No results." for a question the vault plainly answers.
+    db = _indexed_vault(tmp_path, {"inference.md": "# Ollama\n\nThe ollama service runs on the gpu host."})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    before = _value(server.SEARCH_WIDENED)
+    result = server.search("how is ollama updated on the gpu host")
+    assert _paths(result) == ["inference.md"]
+    assert result.startswith(server.PARTIAL_MARKER)
+    assert _value(server.SEARCH_WIDENED) == before + 1
+
+
+# BRD: FR-SRCH-6, FR-SRCH-2
+def test_search_all_terms_rank_before_any_term(tmp_path, monkeypatch):
+    db = _indexed_vault(tmp_path, {
+        "one.md": "alpha",
+        "both.md": "alpha beta",
+        "other.md": "beta gamma",
+    })
+    monkeypatch.setattr(server, "DB_PATH", db)
+    before = _value(server.SEARCH_WIDENED)
+    result = server.search("alpha beta")
+    paths = _paths(result)
+    assert paths[0] == "both.md"
+    assert sorted(paths[1:]) == ["one.md", "other.md"]
+    exact, partial = result.split(server.PARTIAL_MARKER)
+    assert _paths(exact) == ["both.md"]
+    assert _value(server.SEARCH_WIDENED) == before  # an all-terms hit existed
+
+
+# BRD: FR-SRCH-6
+def test_search_stopword_only_query_still_searches(tmp_path, monkeypatch):
+    # Every word is a stopword, so none is dropped; the chunk holds only one of them.
+    db = _indexed_vault(tmp_path, {"note.md": "what"})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    assert _paths(server.search("what is it")) == ["note.md"]
+
+
+# BRD: FR-SRCH-6
+def test_search_respects_explicit_fts_syntax(tmp_path, monkeypatch):
+    # A caller who wrote NOT, a phrase or a column filter asked for exactly that;
+    # filling with any-word matches would hand back what they excluded.
+    db = _indexed_vault(tmp_path, {"keep.md": "alpha", "drop.md": "alpha beta", "phrase.md": "beta alpha"})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    assert _paths(server.search("alpha NOT beta")) == ["keep.md"]
+    assert _paths(server.search('"alpha beta"')) == ["drop.md"]
+    assert server.PARTIAL_MARKER not in server.search('"alpha beta"')
+
+
+# BRD: FR-SRCH-6
+def test_search_malformed_not_query_is_not_filled(tmp_path, monkeypatch):
+    db = _indexed_vault(tmp_path, {"keep.md": "alpha", "drop.md": "alpha beta"})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    result = server.search('alpha NOT "beta')  # unbalanced quote: a syntax error
+    assert "drop.md" not in result
+
+
+# BRD: FR-SRCH-1
+def test_build_index_without_vault_replaces_old_schema(tmp_path):
+    db = tmp_path / "index.db"
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE VIRTUAL TABLE chunks_fts USING fts5(path UNINDEXED, heading, body)")
+    conn.close()
+    assert server.build_index(tmp_path / "absent", db) == 0
+    cols = [r[1] for r in sqlite3.connect(db).execute("PRAGMA table_info(chunks_fts)")]
+    assert cols == ["path", "title", "heading", "body"]
+
+
+# BRD: FR-SRCH-1
+def test_vault_ready_waits_for_git_sync_link(tmp_path, monkeypatch):
+    mount = tmp_path / "mount"
+    (mount / ".git-sync" / "abc").mkdir(parents=True)
+    (mount / ".git-sync" / "abc" / "n.md").write_text("x")
+    monkeypatch.setattr(server, "VAULT_PATH", mount)
+    assert not server._vault_ready()  # mounted, not yet linked
+    (mount / "vault").symlink_to(mount / ".git-sync" / "abc")
+    assert server._vault_ready()
+
+
+# BRD: FR-SRCH-1
+def test_vault_ready_for_local_dev_tree(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "VAULT_PATH", tmp_path)
+    assert not server._vault_ready()
+    (tmp_path / "Domain").mkdir()
+    (tmp_path / "Domain" / "note.md").write_text("x")  # nested only, no top-level note
+    assert server._vault_ready()
+
+
+def _unready_mount(tmp_path):
+    mount = tmp_path / "mount"
+    (mount / ".git-sync" / "abc").mkdir(parents=True)
+    (mount / ".git-sync" / "abc" / "n.md").write_text("# Note\n\nbody")
+    return mount
+
+
+# BRD: FR-IDX-6
+def test_build_index_never_reads_raw_git_sync_mount(tmp_path):
+    db = tmp_path / "index.db"
+    assert server.build_index(_unready_mount(tmp_path), db) == 0
+    assert server._index_current(db)
+
+
+# BRD: FR-IDX-6
+def test_watcher_skips_unready_mount(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "VAULT_PATH", _unready_mount(tmp_path))
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "index.db")
+    assert asyncio.run(server._watch_once(0.0)) == 0.0
+    assert not (tmp_path / "index.db").exists()
+
+
+# BRD: FR-IDX-6
+def test_watcher_reindexes_once_linked(tmp_path, monkeypatch):
+    mount = _unready_mount(tmp_path)
+    (mount / "vault").symlink_to(mount / ".git-sync" / "abc")
+    monkeypatch.setattr(server, "VAULT_PATH", mount)
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "index.db")
+    assert asyncio.run(server._watch_once(0.0)) > 0.0
+    assert server._index_current(tmp_path / "index.db")
+
+
+# BRD: FR-IDX-6
+def test_reindex_refuses_unready_mount(tmp_path, monkeypatch):
+    monkeypatch.setattr(server, "VAULT_PATH", _unready_mount(tmp_path))
+    monkeypatch.setattr(server, "DB_PATH", tmp_path / "index.db")
+    resp = asyncio.run(server._reindex(None))
+    assert resp.status_code == 503
+    assert not (tmp_path / "index.db").exists()
+
+
+# BRD: FR-SRCH-1
+def test_index_current_only_for_this_schema(tmp_path):
+    db = tmp_path / "index.db"
+    assert not server._index_current(db)
+    sqlite3.connect(db).execute("CREATE VIRTUAL TABLE chunks_fts USING fts5(path UNINDEXED, heading, body)")
+    assert not server._index_current(db)
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    (vault / "n.md").write_text("x")
+    server.build_index(vault, db)
+    assert server._index_current(db)
+
+
+# BRD: FR-SRCH-1
+def test_search_matches_note_title(tmp_path, monkeypatch):
+    db = _indexed_vault(tmp_path, {"Decisions/Hosts-Pull_Updates.md": "Nothing is pushed to a machine."})
+    monkeypatch.setattr(server, "DB_PATH", db)
+    assert _paths(server.search("pull")) == ["Decisions/Hosts-Pull_Updates.md"]
+
+
+# BRD: FR-SRCH-4
+def test_search_query_with_quote_does_not_error(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Hello\n\nsay hello world")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    result = server.search('hello "world')
+    assert not result.startswith("Error")
+    assert "note.md" in result
+
+
+# BRD: NFR-SRCH-7
+def test_search_records_latency(tmp_path, monkeypatch):
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+
+    def count():
+        return next(s.value for m in server.SEARCH_SECONDS.collect()
+                    for s in m.samples if s.name.endswith("_count"))
+    before = count()
+    server.search("Python")
+    assert count() == before + 1
+
+
+# BRD: FR-SRCH-7
+def test_search_logs_query_only_when_enabled(tmp_path, monkeypatch, caplog):
+    db = _indexed_db(tmp_path, "# Python\n\nPython is great")
+    monkeypatch.setattr(server, "DB_PATH", db)
+    caplog.set_level("INFO", logger=server.log.name)
+    server.search("secret topic")
+    assert "secret topic" not in caplog.text
+    monkeypatch.setattr(server, "SEARCH_LOG_QUERIES", True)
+    server.search("python question")
+    assert "python question" in caplog.text
+
 # ── read_note ─────────────────────────────────────────────────────────────────
 
 # BRD: FR-READ-1 (VAULT_PATH fallback branch — see test_read_note_prefers_nested_vault_dir for the other branch)

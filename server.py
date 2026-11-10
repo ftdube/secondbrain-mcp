@@ -3,7 +3,7 @@ SecondBrain MCP server — Phase 1a (FTS5 keyword search).
 
 Five tools:
   get_overview()               — context.md + _map.md (session start)
-  search(query)                — FTS5 keyword search, top 10 excerpts
+  search(query)                — FTS5 keyword search: all-terms first, then any-term; top 10 excerpts
   read_note(path, offset=0)     — note by vault-relative path, paginated past ~20,000 chars
   note(title, content)          — save a draft note to the vault inbox
   propose_edit(edits, rationale) — draft a reviewable diff against one or more notes (existing or new), atomically
@@ -35,7 +35,7 @@ import uvicorn
 from fastmcp import FastMCP
 from jwt import PyJWKClient, PyJWTError
 from jwt import decode as jwt_decode
-from prometheus_client import CONTENT_TYPE_LATEST, Counter, generate_latest
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from starlette.applications import Starlette
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
@@ -51,6 +51,8 @@ DEX_JWKS_URI  = os.environ.get("DEX_JWKS_URI", f"{DEX_ISSUER}/keys")
 MCP_CLIENT_ID = os.environ["MCP_CLIENT_ID"]
 MCP_BASE_URL  = os.environ["MCP_BASE_URL"]
 OUTBOX_PATH   = Path(os.environ.get("OUTBOX_PATH", "/outbox"))
+# FR-SRCH-7: off by default -- a query can say as much as the note it looks for.
+SEARCH_LOG_QUERIES = os.environ.get("SEARCH_LOG_QUERIES", "") == "1"
 
 def _parse_blacklist(raw: str) -> tuple[tuple[str, ...], ...]:
     """FR-BLK-1: comma-separated vault-relative directory prefixes excluded from
@@ -93,6 +95,27 @@ def _iter_chunks(path: str, text: str):
         yield path, prev_heading, tail
 
 
+# A note's name is often the only place its subject is stated outright: a decision
+# titled for what it decides may never repeat that phrase in its body.
+def _title(rel_path: Path) -> str:
+    """FR-SRCH-1: the note's folders and filename as words."""
+    return re.sub(r"[-_]+", " ", " ".join(rel_path.with_suffix("").parts))
+
+
+INDEX_COLUMNS = ["path", "title", "heading", "body"]
+
+
+def _index_current(db_path: Path) -> bool:
+    """True when db_path already holds chunks_fts with this version's columns."""
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(db_path)
+    try:
+        return [r[1] for r in conn.execute("PRAGMA table_info(chunks_fts)")] == INDEX_COLUMNS
+    finally:
+        conn.close()
+
+
 def build_index(vault_path: Path, db_path: Path) -> int:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -100,6 +123,7 @@ def build_index(vault_path: Path, db_path: Path) -> int:
         DROP TABLE IF EXISTS chunks_fts;
         CREATE VIRTUAL TABLE chunks_fts USING fts5(
             path     UNINDEXED,
+            title,
             heading,
             body,
             tokenize = 'porter unicode61'
@@ -108,16 +132,20 @@ def build_index(vault_path: Path, db_path: Path) -> int:
     effective = vault_path / "vault"
     if not effective.exists():
         effective = vault_path
-    rows: list[tuple[str, str, str]] = []
-    for md in sorted(effective.rglob("*.md")):
+    rows: list[tuple[str, str, str, str]] = []
+    # An unlinked git-sync mount holds notes only under .git-sync/<sha>/ paths, which
+    # must never be indexed (FR-IDX-6): it yields the empty, current-schema index.
+    raw_mount = effective == vault_path and (vault_path / ".git-sync").exists()
+    for md in sorted(effective.rglob("*.md")) if effective.exists() and not raw_mount else []:
         rel_path = md.relative_to(effective)
         rel = str(rel_path)
         if "Chat Archive" in rel:
             continue
         if _is_blacklisted(rel_path):
             continue
-        rows.extend(_iter_chunks(rel, md.read_text(errors="replace")))
-    conn.executemany("INSERT INTO chunks_fts VALUES (?, ?, ?)", rows)
+        title = _title(rel_path)
+        rows.extend((p, title, h, b) for p, h, b in _iter_chunks(rel, md.read_text(errors="replace")))
+    conn.executemany("INSERT INTO chunks_fts VALUES (?, ?, ?, ?)", rows)
     conn.commit()
     conn.close()
     log.info("indexed %d chunks from %s", len(rows), vault_path)
@@ -136,8 +164,22 @@ OVERVIEW_CHARS  = Counter("mcp_overview_chars_total",  "Characters returned by g
 SEARCH_CHARS    = Counter("mcp_search_chars_total",    "Characters returned by search")
 READ_CHARS      = Counter("mcp_read_chars_total",       "Characters returned by read_note")
 SEARCH_MISSES   = Counter("mcp_search_misses_total",   "Search queries that returned no results")
+SEARCH_WIDENED  = Counter("mcp_search_widened_total",  "Searches no chunk matched on every term, answered by any-term matching")
+SEARCH_SECONDS  = Histogram("mcp_search_seconds",      "search tool latency",
+                            buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5))
 NOTE_COUNTER    = Counter("mcp_notes_total",            "Total note tool calls")
 PROPOSE_COUNTER = Counter("mcp_propose_edits_total",    "Total propose_edit tool calls")
+
+
+def _vault_ready() -> bool:
+    """git-sync's vault/ link exists, or (local dev, no .git-sync/) the tree holds a note."""
+    # The mount exists before git-sync links it; indexing then reads an empty or
+    # half-written tree and replaces a good persisted index with nothing.
+    if (VAULT_PATH / "vault").exists():
+        return True
+    if (VAULT_PATH / ".git-sync").exists():
+        return False
+    return VAULT_PATH.is_dir() and any(VAULT_PATH.rglob("*.md"))
 
 
 def _effective_vault() -> Path:
@@ -174,45 +216,88 @@ def get_overview() -> str:
         return f"Error: {e}"
 
 
+SEARCH_LIMIT = 10
+
+# Words that carry no subject. Requiring them is what made a question phrased in
+# plain language miss: every term had to occur in one chunk, "how" and "is" included.
+_STOPWORDS = frozenset([
+    "a", "about", "an", "and", "any", "are", "as", "at", "be", "been", "but", "by",
+    "can", "could", "did", "do", "does", "for", "from", "had", "has", "have", "how",
+    "i", "if", "in", "into", "is", "it", "its", "me", "my", "no", "not", "of", "on",
+    "or", "our", "should", "so", "than", "that", "the", "their", "them", "then",
+    "there", "these", "they", "this", "those", "to", "was", "we", "were", "what",
+    "when", "where", "which", "who", "whom", "why", "will", "with", "would", "you",
+    "your",
+])
+
+_SEARCH_SQL = """
+    SELECT rowid,
+           path,
+           heading,
+           snippet(chunks_fts, 3, '', '', '…', 64) AS excerpt
+    FROM   chunks_fts
+    WHERE  chunks_fts MATCH ?
+    ORDER  BY rank
+    LIMIT  ?
+"""
+
+
+# FTS5 syntax a caller wrote on purpose: a phrase, prefix, boost, column filter,
+# grouping or operator (operators are case-sensitive in FTS5, so "and" is a word).
+_FTS_SYNTAX = re.compile(r'["*^():]|\b(?:AND|OR|NOT|NEAR)\b')
+
+PARTIAL_MARKER = "_Partial matches — some of the words:_"
+
+
+# Stopwords are dropped unless nothing else is left; bm25 still ranks a chunk matching
+# more of the words above one matching fewer.
+def _any_term(query: str) -> str | None:
+    """FR-SRCH-6: the query's words, each quoted so none reads as FTS5 syntax, joined with OR."""
+    words = re.findall(r"\w+", query.lower())
+    kept = [w for w in words if w not in _STOPWORDS] or words
+    return " OR ".join(f'"{w}"' for w in dict.fromkeys(kept)) or None
+
+
 @mcp.tool()
 def search(query: str) -> str:
-    """Search the vault. Returns up to 10 excerpts (path, heading, 200-char snippet)."""
+    """Search the vault by keyword. Plain-language questions work: chunks containing every word rank first, then chunks containing any of them. Returns up to 10 excerpts (path, heading, ~64-token snippet)."""
     try:
         SEARCH_COUNTER.inc()
-        conn = sqlite3.connect(DB_PATH)
-        try:
-            rows = conn.execute(
-                """
-                SELECT path,
-                       heading,
-                       snippet(chunks_fts, 2, '', '', '…', 30) AS excerpt
-                FROM   chunks_fts
-                WHERE  chunks_fts MATCH ?
-                ORDER  BY rank
-                LIMIT  10
-                """,
-                (query,),
-            ).fetchall()
-        except sqlite3.OperationalError:
-            # FTS5 syntax error — retry as a quoted phrase
-            rows = conn.execute(
-                """
-                SELECT path,
-                       heading,
-                       snippet(chunks_fts, 2, '', '', '…', 30) AS excerpt
-                FROM   chunks_fts
-                WHERE  chunks_fts MATCH ?
-                ORDER  BY rank
-                LIMIT  10
-                """,
-                (f'"{query}"',),
-            ).fetchall()
-        finally:
-            conn.close()
-        if not rows:
+        with SEARCH_SECONDS.time():
+            conn = sqlite3.connect(DB_PATH)
+            try:
+                plain = not _FTS_SYNTAX.search(query)
+                try:
+                    rows = conn.execute(_SEARCH_SQL, (query, SEARCH_LIMIT)).fetchall()
+                except sqlite3.OperationalError:
+                    # Not valid syntax, so not syntax the caller meant -- except an
+                    # exclusion: filling would return what a NOT asked to leave out.
+                    plain = not re.search(r"\bNOT\b", query)
+                    # FR-SRCH-4: FTS5 syntax error -- retry as a quoted phrase. Inner quotes
+                    # are doubled, or a query containing one fails the retry as well.
+                    phrase = '"' + query.replace('"', '""') + '"'
+                    rows = conn.execute(_SEARCH_SQL, (phrase, SEARCH_LIMIT)).fetchall()
+                extra = []
+                broad = _any_term(query) if plain else None
+                if len(rows) < SEARCH_LIMIT and broad:
+                    seen = {r[0] for r in rows}
+                    extra = [r for r in conn.execute(_SEARCH_SQL, (broad, SEARCH_LIMIT * 2)).fetchall()
+                             if r[0] not in seen][: SEARCH_LIMIT - len(rows)]
+                widened = not rows and bool(extra)
+            finally:
+                conn.close()
+        if widened:
+            SEARCH_WIDENED.inc()
+        if SEARCH_LOG_QUERIES:
+            log.info("search query=%r results=%d widened=%s", query, len(rows) + len(extra), widened)
+        if not rows and not extra:
             SEARCH_MISSES.inc()
             return "No results."
-        result = "\n\n".join(f"**{r[0]}** — {r[1]}\n{r[2]}" for r in rows)
+        # FR-SRCH-6: partial matches are marked, so a caller can tell them from exact ones.
+        blocks = [f"**{r[1]}** — {r[2]}\n{r[3]}" for r in rows]
+        if extra:
+            blocks += [PARTIAL_MARKER] + [f"**{r[1]}** — {r[2]}\n{r[3]}" for r in extra]
+        result = "\n\n".join(blocks)
         SEARCH_CHARS.inc(len(result))
         return result
     except Exception as e:  # noqa: BLE001 — FR-COM-6: tools return errors to the client, never raise
@@ -428,18 +513,27 @@ async def _vault_watcher() -> None:
     last: float = 0.0
     while True:
         await asyncio.sleep(30)
-        try:
-            mtime = max(
-                f.stat().st_mtime
-                for f in _effective_vault().rglob("*.md")
-                if "Chat Archive" not in str(f)
-            )
-            if mtime > last:
-                log.info("vault updated, reindexing")
-                await asyncio.to_thread(build_index, VAULT_PATH, DB_PATH)
-                last = mtime
-        except (ValueError, FileNotFoundError):
-            pass
+        last = await _watch_once(last)
+
+
+async def _watch_once(last: float) -> float:
+    """One watcher poll: reindex if the vault is ready and changed since `last`."""
+    # FR-IDX-6: an unready git-sync mount would be scanned through .git-sync/ paths.
+    if not _vault_ready():
+        return last
+    try:
+        mtime = max(
+            f.stat().st_mtime
+            for f in _effective_vault().rglob("*.md")
+            if "Chat Archive" not in str(f)
+        )
+    except (ValueError, FileNotFoundError):
+        return last
+    if mtime > last:
+        log.info("vault updated, reindexing")
+        await asyncio.to_thread(build_index, VAULT_PATH, DB_PATH)
+        return mtime
+    return last
 
 
 # ── HTTP app ──────────────────────────────────────────────────────────────────
@@ -447,10 +541,13 @@ async def _vault_watcher() -> None:
 @asynccontextmanager
 async def _lifespan(app: Starlette) -> AsyncIterator[None]:
     async with mcp_asgi.lifespan(app):
-        if VAULT_PATH.exists():
+        ready = _vault_ready()
+        if ready or not _index_current(DB_PATH):
+            # Without a vault this builds an empty index: better than an older schema
+            # search's column indexes would not fit.
             build_index(VAULT_PATH, DB_PATH)
-        else:
-            log.warning("vault not mounted at startup; index empty until first sync")
+        if not ready:
+            log.warning("vault not ready at startup; serving the persisted index until first sync")
         asyncio.create_task(_vault_watcher())
         yield
 
@@ -464,6 +561,8 @@ async def _health(_: Request) -> JSONResponse:
 
 
 async def _reindex(_: Request) -> JSONResponse:
+    if not _vault_ready():  # FR-IDX-6
+        return JSONResponse({"status": "vault not ready"}, status_code=503)
     n = await asyncio.to_thread(build_index, VAULT_PATH, DB_PATH)
     return JSONResponse({"status": "indexed", "chunks": n})
 

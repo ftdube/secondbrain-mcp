@@ -1,4 +1,4 @@
-fastmcp==4.1.4
+fastmcp==4.1.8
 prometheus-client==0.26.0
 PyJWT==2.15.1
 cryptography==50.0.2
